@@ -40,9 +40,15 @@ cryptography==50.0.1
     # via pdfminer-six
 ddgs==9.16.0
     # via langgraph-multiagent-orchestrator
+defusedxml==0.7.1
+    # via fpdf2
 distro==1.9.0
     # via langsmith
 fastapi==0.141.1
+    # via langgraph-multiagent-orchestrator
+fonttools==4.66.0
+    # via fpdf2
+fpdf2==2.8.8
     # via langgraph-multiagent-orchestrator
 h11==0.16.0
     # via
@@ -128,7 +134,9 @@ pdfminer-six==20260107
 pdfplumber==0.11.10
     # via langgraph-multiagent-orchestrator
 pillow==12.3.0
-    # via pdfplumber
+    # via
+    #   fpdf2
+    #   pdfplumber
 primp==2.0.1
     # via ddgs
 prometheus-client==0.26.0
