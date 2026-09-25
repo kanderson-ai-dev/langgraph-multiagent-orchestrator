@@ -83,8 +83,13 @@ class ResearcherWorker:
 
     async def run(self, state: dict[str, Any]) -> StateUpdate:
         brief: Brief = state["brief"]
-        plan = await self._llm.structured(
+        from app.core.cost_tracking import tracked_structured
+
+        plan = await tracked_structured(
+            self._llm,
             ResearchPlan,
+            role=self.name,
+            model="",
             system=RESEARCHER_SYSTEM.format(max_queries=self._max_queries),
             user=self._plan_prompt(brief),
             context={"brief": brief.model_dump()},

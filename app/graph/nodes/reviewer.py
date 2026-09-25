@@ -14,6 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.core.metrics import DEBATE_ROUNDS_TOTAL
 from app.framework.worker import StateUpdate
 from app.graph.citations import citation_supported, support_rate
 from app.graph.prompts import REVIEWER_SYSTEM
@@ -104,9 +105,15 @@ class ReviewerWorker:
 
         draft = drafts[-1]
         kept, dropped = verify_citations(draft, evidence)
+        DEBATE_ROUNDS_TOTAL.inc()
 
-        out = await self._llm.structured(
+        from app.core.cost_tracking import tracked_structured
+
+        out = await tracked_structured(
+            self._llm,
             ReviewOutput,
+            role=self.name,
+            model="",
             system=REVIEWER_SYSTEM,
             user=self._prompt(brief, draft, kept),
             context={"draft_version": draft.version},

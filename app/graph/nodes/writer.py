@@ -63,8 +63,13 @@ class WriterWorker:
     async def run(self, state: dict[str, Any]) -> StateUpdate:
         brief: Brief = state["brief"]
         version = len(state.get("drafts", [])) + 1
-        out = await self._llm.structured(
+        from app.core.cost_tracking import tracked_structured
+
+        out = await tracked_structured(
+            self._llm,
             DraftOutput,
+            role=self.name,
+            model="",
             system=WRITER_SYSTEM,
             user=self._prompt(state),
             context={"brief": brief.model_dump(), "version": version},

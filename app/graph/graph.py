@@ -169,13 +169,12 @@ def build_graph(
             sender="supervisor", recipient=target, kind="dispatch",
             content=reason or f"routing to {target}",
         )
-        return {"next_worker": target, "transcript": [msg]}
-
-    async def human_review_node(state: OrchestrationState) -> dict[str, Any]:
-        verdict = state.get("latest_verdict")
-        return {
-            "status": "awaiting_review",
-            "transcript": [
+        update: dict[str, Any] = {"next_worker": target, "transcript": [msg]}
+        if target == "human_review":
+            # Persist the escalation *before* the interrupt so the checkpoint
+            # already reflects awaiting_review when the graph pauses.
+            update["status"] = "awaiting_review"
+            update["transcript"].append(
                 AgentMessage(
                     sender="supervisor", recipient="human",
                     kind="escalation",
@@ -184,13 +183,69 @@ def build_graph(
                         + (f" — last feedback: {'; '.join(verdict.feedback)}"
                            if verdict else "")
                     ),
-                    round=state.get("debate_round", 0),
+                    round=rounds,
                 )
-            ],
+            )
+        return update
+
+    async def human_review_node(state: OrchestrationState) -> dict[str, Any]:
+        """Pause for human review via LangGraph ``interrupt()``.
+
+        First entry escalates (status awaiting_review). Resumed with
+        ``Command(resume={"action": "approve"|"edit"|"reject", ...})``:
+        approve → assemble the report; edit → route back to writer with the
+        human's feedback appended; reject → terminal rejection.
+        """
+        from langgraph.types import interrupt
+
+        verdict = state.get("latest_verdict")
+        decision = interrupt(
+            {
+                "reason": "debate_rounds_exhausted",
+                "debate_round": state.get("debate_round", 0),
+                "latest_verdict": verdict.model_dump() if verdict else None,
+                "actions": ["approve", "edit", "reject"],
+            }
+        )
+        from app.core.metrics import HUMAN_REVIEW_TOTAL
+
+        action = str(decision.get("action", "reject")) if isinstance(decision, dict) else "reject"
+        HUMAN_REVIEW_TOTAL.labels(resolution=action).inc()
+        resume = AgentMessage(
+            sender="human", recipient="supervisor",
+            kind="system", content=f"Human decision: {action}",
+            round=state.get("debate_round", 0),
+        )
+        if action == "approve":
+            return {
+                "next_worker": "report_assembler",
+                "status": "running",
+                "transcript": [resume],
+            }
+        if action == "edit":
+            feedback = str(decision.get("feedback", ""))
+            if verdict is not None:
+                verdict = verdict.model_copy(
+                    update={"feedback": [*verdict.feedback, f"[human] {feedback}"]}
+                )
+            return {
+                "next_worker": "writer",
+                "latest_verdict": verdict,
+                "status": "running",
+                "transcript": [resume],
+            }
+        return {
+            "next_worker": "rejection_output",
+            "status": "failed",
+            "transcript": [resume],
+            "errors": ["rejected by human reviewer"],
         }
 
     async def report_assembler_node(state: OrchestrationState) -> dict[str, Any]:
+        from app.core.metrics import JOBS_TOTAL
+
         report = assemble_report(dict(state))
+        JOBS_TOTAL.labels(status="done" if report else "failed").inc()
         return {
             "final_report": report,
             "status": "done" if report else "failed",
@@ -244,7 +299,15 @@ def build_graph(
     )
     for worker in registry:
         builder.add_edge(worker.name, "supervisor")
-    builder.add_edge("human_review", END)
+    builder.add_conditional_edges(
+        "human_review",
+        lambda s: s.get("next_worker") or "rejection_output",
+        {
+            "report_assembler": "report_assembler",
+            "writer": "writer",
+            "rejection_output": "rejection_output",
+        },
+    )
     builder.add_edge("report_assembler", "output_guardrail")
     builder.add_edge("output_guardrail", END)
     builder.add_edge("rejection_output", END)
