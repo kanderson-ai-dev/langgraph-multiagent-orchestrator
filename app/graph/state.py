@@ -64,7 +64,7 @@ class ReportDraft(BaseModel):
 class ReviewVerdict(BaseModel):
     """The Reviewer's structured verdict on a draft."""
 
-    draft_version: int = Field(ge=1)
+    draft_version: int = Field(ge=0)  # 0 = "no draft exists yet"
     verdict: Verdict
     score: float = Field(ge=1.0, le=5.0)
     rubric: dict[str, float] = Field(default_factory=dict)
