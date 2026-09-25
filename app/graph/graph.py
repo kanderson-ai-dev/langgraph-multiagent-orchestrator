@@ -113,15 +113,18 @@ def build_graph(
     supervisor = Supervisor(registry, decider, max_dispatches=25)
 
     async def input_guardrail_node(state: OrchestrationState) -> dict[str, Any]:
-        """Structural sanity gate (semantic screening lands with guardrails)."""
+        """Screen the brief before any paid call — blocked input burns 0 tokens."""
+        from app.graph.guardrails import screen_brief
+
         brief = state["brief"]
-        if not brief.topic.strip():
+        result = screen_brief(brief)
+        if not result.allowed:
             return {
                 "status": "blocked",
                 "transcript": [
                     AgentMessage(
                         sender="input_guardrail", recipient="user",
-                        kind="system", content="Empty topic — rejected.",
+                        kind="system", content=f"Request blocked: {result.reason}",
                     )
                 ],
             }
@@ -194,6 +197,26 @@ def build_graph(
             "errors": [] if report else ["no draft produced"],
         }
 
+    async def output_guardrail_node(state: OrchestrationState) -> dict[str, Any]:
+        """Screen the assembled report for prompt leakage before it ships."""
+        from app.core.metrics import BLOCKED_REQUESTS_TOTAL
+        from app.graph.guardrails import screen_output
+
+        report = state.get("final_report")
+        if report is None:
+            return {}
+        result = screen_output(report)
+        if result.allowed:
+            return {}
+        BLOCKED_REQUESTS_TOTAL.inc()
+        return {
+            "final_report": (
+                "The generated report was withheld by the output guardrail "
+                f"({result.reason})."
+            ),
+            "errors": [f"output_guardrail: {result.reason}"],
+        }
+
     def route_after_guardrail(state: OrchestrationState) -> str:
         return "rejection_output" if state.get("status") == "blocked" else "supervisor"
 
@@ -205,6 +228,7 @@ def build_graph(
     builder.add_node("supervisor", supervisor_node)
     builder.add_node("human_review", human_review_node)
     builder.add_node("report_assembler", report_assembler_node)
+    builder.add_node("output_guardrail", output_guardrail_node)
     builder.add_node("rejection_output", rejection_output_node)
     for worker in registry:
         builder.add_node(worker.name, _as_node(worker))
@@ -221,7 +245,8 @@ def build_graph(
     for worker in registry:
         builder.add_edge(worker.name, "supervisor")
     builder.add_edge("human_review", END)
-    builder.add_edge("report_assembler", END)
+    builder.add_edge("report_assembler", "output_guardrail")
+    builder.add_edge("output_guardrail", END)
     builder.add_edge("rejection_output", END)
 
     return builder.compile(checkpointer=checkpointer)

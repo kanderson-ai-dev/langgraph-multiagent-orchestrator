@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
 from app.framework.worker import StateUpdate
+from app.graph.guardrails import sanitize_untrusted
 from app.graph.prompts import RESEARCHER_SYSTEM
 from app.graph.state import AgentMessage, Brief, EvidenceItem
 from app.services.document_parser import parse_document
@@ -70,11 +71,13 @@ class ResearcherWorker:
         )
         if not doc.text:
             return None
+        # Untrusted content is sanitized before it can ever reach a prompt.
+        sanitized = sanitize_untrusted(doc.text)
         return EvidenceItem(
             evidence_id=str(uuid.uuid4()),
             url=str(page.url),
             title=doc.title,
-            text=doc.text[:_MAX_EVIDENCE_CHARS],
+            text=sanitized[:_MAX_EVIDENCE_CHARS],
             query=query,
         )
 
