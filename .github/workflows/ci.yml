@@ -27,14 +27,24 @@ jobs:
       - name: mypy (strict)
         run: uv run mypy --strict app/
 
-      - name: pytest + coverage
-        run: uv run pytest -v --cov=app --cov-report=term-missing
+      - name: pytest + coverage (≥80% on app/)
+        run: uv run pytest -v --cov=app --cov-report=term-missing --cov-fail-under=80
         env:
           OPENAI_API_KEY: ""
           SEARCH_API_KEY: ""
           LANGCHAIN_API_KEY: ""
           JWT_SECRET_KEY: ""
 
+      - name: EDD quality gate
+        run: uv run python -m evaluation.run_eval
+        env:
+          OPENAI_API_KEY: ""
+          SEARCH_API_KEY: ""
+
       - name: pip-audit
         run: uv run pip-audit --strict
-        continue-on-error: true # Phase 10: make blocking once the dep tree stabilizes
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_COMMENTS: "false"
