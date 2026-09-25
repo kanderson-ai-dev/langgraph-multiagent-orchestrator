@@ -129,8 +129,11 @@ class ResearcherWorker:
                 f"across {len(queries)} queries."
             ),
         )
+        from app.core.cost_tracking import current_cost
+
         return {
             "sub_questions": plan.sub_questions,
             "evidence": evidence,
+            "cost_so_far": current_cost(),
             "transcript": [msg],
         }

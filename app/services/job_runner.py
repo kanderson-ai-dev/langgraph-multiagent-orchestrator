@@ -105,6 +105,11 @@ class JobRunner:
                 state = initial_state(
                     job_id=job_id, workspace_id=workspace_id, brief=brief,
                     max_debate_rounds=self._settings.max_debate_rounds,
+                    budget_usd=(
+                        brief.budget_usd
+                        if brief.budget_usd is not None
+                        else self._settings.default_job_budget_usd
+                    ),
                 )
                 async for chunk in self._graph.astream(
                     state, config=self._config(job_id),
@@ -121,9 +126,12 @@ class JobRunner:
     async def _resume(
         self, job_id: str, workspace_id: str, decision: dict[str, Any]
     ) -> None:
+        """Resume a paused job; ``base_cost`` re-seeds pre-pause spend so cost
+        accounting and budget enforcement stay monotonic across resume."""
+        base = await self._usage.job_cost(job_id)
         tracker = UsageTracker(
             job_id=job_id, workspace_id=workspace_id,
-            store=self._usage, settings=self._settings,
+            store=self._usage, settings=self._settings, base_cost=base,
         )
         started = time.monotonic()
         try:
@@ -200,7 +208,10 @@ class JobRunner:
             )
         else:
             await self._jobs.update_status(workspace_id, job_id, status)  # type: ignore[arg-type]
-        self._emit(job_id, {"node": "runner", "status": status, "terminal": True})
+        self._emit(
+            job_id,
+            {"node": "runner", "status": status, "terminal": True, "cost_usd": cost},
+        )
 
     async def cancel(self, job_id: str) -> None:
         task = self._tasks.get(job_id)

@@ -35,8 +35,9 @@ class SubmitRequest(BaseModel):
 
 
 class ReviewRequest(BaseModel):
-    action: str  # approve | edit | reject
+    action: str  # approve | edit | reject | fund
     feedback: str = ""
+    additional_budget_usd: float = Field(default=0.0, ge=0.0)
 
 
 class JobResponse(BaseModel):
@@ -131,10 +132,18 @@ async def review(
         raise HTTPException(status_code=404, detail="job not found")
     if job.status != "awaiting_review":
         raise HTTPException(status_code=409, detail=f"job is {job.status}, not awaiting_review")
-    if body.action not in ("approve", "edit", "reject"):
-        raise HTTPException(status_code=422, detail="action must be approve|edit|reject")
+    if body.action not in ("approve", "edit", "reject", "fund"):
+        raise HTTPException(
+            status_code=422, detail="action must be approve|edit|reject|fund"
+        )
     await _runner(request).resume(
-        job_id, ctx.workspace_id, {"action": body.action, "feedback": body.feedback}
+        job_id,
+        ctx.workspace_id,
+        {
+            "action": body.action,
+            "feedback": body.feedback,
+            "additional_budget_usd": body.additional_budget_usd,
+        },
     )
     return {"status": "resumed"}
 

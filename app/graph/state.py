@@ -136,4 +136,6 @@ class OrchestrationState(TypedDict, total=False):
     mandate: str  # transient: mandate for a dispatched worker (fan-out)
     pending_sends: list[dict[str, str]]  # transient: fan-out dispatches
     cost_so_far: float
+    budget_usd: float | None  # hard LLM-spend cap; None = unlimited
+    escalation_reason: str | None  # "debate_rounds" | "budget"
     audit_root: str | None

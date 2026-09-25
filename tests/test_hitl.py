@@ -50,7 +50,7 @@ async def test_interrupt_pauses_awaiting_review(
     assert out["status"] == "awaiting_review"
     interrupt_payload = out["__interrupt__"][0].value
     assert interrupt_payload["reason"] == "debate_rounds_exhausted"
-    assert set(interrupt_payload["actions"]) == {"approve", "edit", "reject"}
+    assert set(interrupt_payload["actions"]) == {"approve", "edit", "reject", "fund"}
 
 
 async def test_resume_approve_assembles(brief_kwargs: dict[str, object]) -> None:

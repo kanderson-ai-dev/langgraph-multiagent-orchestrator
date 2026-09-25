@@ -78,6 +78,8 @@ class Settings(BaseSettings):
     # Cost accounting (USD per 1M tokens)
     cost_input_price_per_1m: float = Field(default=0.15, ge=0.0)
     cost_output_price_per_1m: float = Field(default=0.60, ge=0.0)
+    # Cost governance: default per-job LLM budget; None = unlimited.
+    default_job_budget_usd: float | None = Field(default=None, ge=0.0)
 
     @field_validator(
         "openai_api_key",

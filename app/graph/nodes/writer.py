@@ -120,4 +120,6 @@ class WriterWorker:
             content=f"{action} report v{version}: {draft.title}",
             round=state.get("debate_round", 0),
         )
-        return {"drafts": [draft], "transcript": [msg]}
+        from app.core.cost_tracking import current_cost
+
+        return {"drafts": [draft], "cost_so_far": current_cost(), "transcript": [msg]}

@@ -151,8 +151,11 @@ class ReviewerWorker:
             ),
             round=debate_round,
         )
+        from app.core.cost_tracking import current_cost
+
         return {
             "latest_verdict": verdict,
             "debate_round": debate_round,
+            "cost_so_far": current_cost(),
             "transcript": [msg],
         }

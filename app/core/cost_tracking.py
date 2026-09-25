@@ -36,12 +36,20 @@ class UsageTracker:
     """Accumulates per-role usage for one orchestration job."""
 
     def __init__(
-        self, *, job_id: str, workspace_id: str, store: UsageStore, settings: Settings
+        self,
+        *,
+        job_id: str,
+        workspace_id: str,
+        store: UsageStore,
+        settings: Settings,
+        base_cost: float = 0.0,
     ) -> None:
         self.job_id = job_id
         self.workspace_id = workspace_id
         self._store = store
         self._settings = settings
+        # Cost recorded before a HITL resume — keeps totals monotonic.
+        self._base_cost = base_cost
         self.records: list[UsageRecord] = []
 
     def compute_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
@@ -86,7 +94,7 @@ class UsageTracker:
 
     @property
     def total_cost(self) -> float:
-        return sum(r.cost_usd for r in self.records)
+        return self._base_cost + sum(r.cost_usd for r in self.records)
 
 
 @asynccontextmanager
@@ -101,6 +109,12 @@ async def bind_tracker(tracker: UsageTracker) -> AsyncIterator[UsageTracker]:
 
 def current_tracker() -> "UsageTracker | None":
     return _current.get()
+
+
+def current_cost() -> float:
+    """Total USD spent so far by the bound job tracker (0 when unbound)."""
+    tracker = _current.get()
+    return tracker.total_cost if tracker else 0.0
 
 
 async def tracked_structured(

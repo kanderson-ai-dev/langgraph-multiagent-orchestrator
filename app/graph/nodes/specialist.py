@@ -83,4 +83,10 @@ class SpecialistWorker:
             ),
             round=state.get("debate_round", 0),
         )
-        return {"analyst_notes": [note], "transcript": [msg]}
+        from app.core.cost_tracking import current_cost
+
+        return {
+            "analyst_notes": [note],
+            "cost_so_far": current_cost(),
+            "transcript": [msg],
+        }

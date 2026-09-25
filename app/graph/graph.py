@@ -153,12 +153,21 @@ def build_graph(
         rounds = state.get("debate_round", 0)
         max_rounds = state.get("max_debate_rounds", settings.max_debate_rounds)
 
-        if verdict is not None:
+        # Cost governance: a spent budget stops all further paid work before
+        # the decider itself burns tokens. An approved draft may still finish.
+        budget = state.get("budget_usd")
+        over_budget = budget is not None and state.get("cost_so_far", 0.0) >= budget
+        if over_budget and not (verdict and verdict.verdict == "approve"):
+            from app.core.metrics import BUDGET_EXCEEDED_TOTAL
+
+            BUDGET_EXCEEDED_TOTAL.inc()
+            nxt, reason = "human_review", "budget_exceeded"
+        elif verdict is not None:
             drafts = state.get("drafts", [])
             has_newer_draft = drafts and drafts[-1].version > verdict.draft_version
             if verdict.verdict == "revise" and has_newer_draft:
                 # Writer already produced a newer draft — send it for review.
-                nxt: str = reviewer.name
+                nxt = reviewer.name
                 reason = f"new draft v{drafts[-1].version} pending review"
             else:
                 # Debate bound is deterministic — never left to the decider.
@@ -188,16 +197,25 @@ def build_graph(
             # Persist the escalation *before* the interrupt so the checkpoint
             # already reflects awaiting_review when the graph pauses.
             update["status"] = "awaiting_review"
+            update["escalation_reason"] = (
+                "budget" if reason == "budget_exceeded" else "debate_rounds"
+            )
+            if reason == "budget_exceeded":
+                content = (
+                    f"LLM budget exhausted at ${state.get('cost_so_far', 0.0):.4f} "
+                    f"(cap ${state.get('budget_usd') or 0.0:.4f}) — approve the "
+                    "current draft, or fund more budget to continue."
+                )
+            else:
+                content = (
+                    "Debate budget exhausted without approval"
+                    + (f" — last feedback: {'; '.join(verdict.feedback)}"
+                       if verdict else "")
+                )
             update["transcript"].append(
                 AgentMessage(
                     sender="supervisor", recipient="human",
-                    kind="escalation",
-                    content=(
-                        "Debate budget exhausted without approval"
-                        + (f" — last feedback: {'; '.join(verdict.feedback)}"
-                           if verdict else "")
-                    ),
-                    round=rounds,
+                    kind="escalation", content=content, round=rounds,
                 )
             )
         return update
@@ -218,7 +236,7 @@ def build_graph(
                 "reason": "debate_rounds_exhausted",
                 "debate_round": state.get("debate_round", 0),
                 "latest_verdict": verdict.model_dump() if verdict else None,
-                "actions": ["approve", "edit", "reject"],
+                "actions": ["approve", "edit", "reject", "fund"],
             }
         )
         from app.core.metrics import HUMAN_REVIEW_TOTAL
@@ -230,6 +248,21 @@ def build_graph(
             kind="system", content=f"Human decision: {action}",
             round=state.get("debate_round", 0),
         )
+        if action == "fund":
+            # Top up the LLM budget and hand control back to the Supervisor.
+            extra = float(decision.get("additional_budget_usd", 0.0))
+            budget = (state.get("budget_usd") or 0.0) + max(extra, 0.0)
+            return {
+                "next_worker": "supervisor",
+                "budget_usd": budget,
+                "escalation_reason": None,
+                "status": "running",
+                "transcript": [AgentMessage(
+                    sender="human", recipient="supervisor", kind="system",
+                    content=f"Human funded +${extra:.4f} (cap now ${budget:.4f})",
+                    round=state.get("debate_round", 0),
+                )],
+            }
         if action == "approve":
             return {
                 "next_worker": "report_assembler",
@@ -319,6 +352,7 @@ def build_graph(
         {
             "report_assembler": "report_assembler",
             "writer": "writer",
+            "supervisor": "supervisor",
             "rejection_output": "rejection_output",
         },
     )
@@ -330,7 +364,12 @@ def build_graph(
 
 
 def initial_state(
-    *, job_id: str, workspace_id: str, brief: Any, max_debate_rounds: int
+    *,
+    job_id: str,
+    workspace_id: str,
+    brief: Any,
+    max_debate_rounds: int,
+    budget_usd: float | None = None,
 ) -> dict[str, Any]:
     """Seed state for a new orchestration job."""
     return {
@@ -352,5 +391,9 @@ def initial_state(
         "team": team_for(brief.report_type),
         "dispatches": 0,
         "cost_so_far": 0.0,
+        "budget_usd": (
+            budget_usd if budget_usd is not None else brief.budget_usd
+        ),
+        "escalation_reason": None,
         "audit_root": None,
     }

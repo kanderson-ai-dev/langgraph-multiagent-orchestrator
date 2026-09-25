@@ -41,6 +41,10 @@ BLOCKED_REQUESTS_TOTAL = Counter(
     "orchestrator_blocked_requests_total",
     "Requests rejected by the input guardrail",
 )
+BUDGET_EXCEEDED_TOTAL = Counter(
+    "orchestrator_budget_exceeded_total",
+    "Jobs escalated to human review because the LLM budget was exhausted",
+)
 
 
 def instrument_app(app: Starlette) -> None:
