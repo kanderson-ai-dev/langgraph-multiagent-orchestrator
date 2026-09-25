@@ -76,6 +76,10 @@ class StubLLM:
     def register(self, schema_name: str, builder: StubBuilder) -> None:
         self._builders[schema_name] = builder
 
+    def register_default(self, schema_name: str, builder: StubBuilder) -> None:
+        """Register only when absent — caller-supplied builders win."""
+        self._builders.setdefault(schema_name, builder)
+
     async def structured(
         self,
         schema: type[_T],

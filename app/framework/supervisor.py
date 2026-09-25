@@ -29,7 +29,9 @@ class RoutingDecision(BaseModel):
         return self.next_worker == FINISH
 
 
-RouterDecider = Callable[[dict[str, Any], WorkerRegistry], Awaitable[RoutingDecision]]
+RouterDecider = Callable[
+    [dict[str, Any], WorkerRegistry], Awaitable[RoutingDecision] | RoutingDecision
+]
 
 
 class Supervisor:
@@ -64,7 +66,12 @@ class Supervisor:
                 reason=f"dispatch budget exhausted ({self.max_dispatches})",
             )
         try:
-            decision = await self._decider(state, self.registry)
+            decision_or_coro = self._decider(state, self.registry)
+            decision = (
+                await decision_or_coro
+                if isinstance(decision_or_coro, Awaitable)
+                else decision_or_coro
+            )
         except Exception as exc:  # decider failure must never crash the graph
             return RoutingDecision(next_worker=FINISH, reason=f"decider error: {exc!r}")
         if decision.next_worker != FINISH and decision.next_worker not in self.registry:
