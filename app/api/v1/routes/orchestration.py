@@ -162,9 +162,44 @@ async def report_pdf(
 
     from app.services.pdf_export import markdown_to_pdf
 
-    pdf = markdown_to_pdf(str(job.result["report"]), title=job.brief.topic)
+    report_md = str(job.result["report"])
+    pdf = markdown_to_pdf(report_md, title=job.brief.topic)
     return Response(
         content=pdf,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="report-{job_id}.pdf"'},
     )
+
+
+@router.get("/reports/{job_id}/audit", response_model=dict[str, Any])
+async def audit_trail(
+    job_id: str,
+    request: Request,
+    ctx: RequestContext = Depends(get_context),
+) -> dict[str, Any]:
+    """Return the hash-chained audit trail and re-verify it on the fly.
+
+    ``valid`` is recomputed from the stored transcript — a tampered history
+    would fail verification rather than parrot a stored ``True``.
+    """
+    job = await _jobs(request).get(ctx.workspace_id, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if not job.result or "transcript" not in job.result:
+        raise HTTPException(status_code=409, detail="audit trail not ready")
+
+    from app.graph.state import AgentMessage
+    from app.services.audit import GENESIS, chain_transcript, verify_chain
+
+    raw = job.result["transcript"]
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=409, detail="audit trail not ready")
+    messages = [AgentMessage.model_validate(m) for m in raw]
+    entries = chain_transcript(messages)
+    stored_root = str(job.result.get("audit_root") or GENESIS)
+    return {
+        "job_id": job.job_id,
+        "audit_root": stored_root,
+        "valid": verify_chain(messages, stored_root),
+        "entries": [e.model_dump() for e in entries],
+    }

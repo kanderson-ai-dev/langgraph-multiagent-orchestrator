@@ -290,13 +290,25 @@ def build_graph(
 
     async def report_assembler_node(state: OrchestrationState) -> dict[str, Any]:
         from app.core.metrics import JOBS_TOTAL
+        from app.services.audit import audit_root as compute_audit_root
 
         report = assemble_report(dict(state))
         JOBS_TOTAL.labels(status="done" if report else "failed").inc()
+        # Seal the transcript: the audit root covers every dispatch, verdict
+        # and escalation up to and including this assembly event.
+        seal = AgentMessage(
+            sender="report_assembler", recipient="user", kind="system",
+            content="Report assembled; transcript sealed.",
+        )
+        root = compute_audit_root([*state.get("transcript", []), seal])
+        if report:
+            report = report.rstrip() + f"\n\n---\n_Audit root: `{root}`_\n"
         return {
             "final_report": report,
+            "audit_root": root,
             "status": "done" if report else "failed",
             "errors": [] if report else ["no draft produced"],
+            "transcript": [seal],
         }
 
     async def output_guardrail_node(state: OrchestrationState) -> dict[str, Any]:

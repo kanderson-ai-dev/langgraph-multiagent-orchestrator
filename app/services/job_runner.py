@@ -191,14 +191,20 @@ class JobRunner:
         status = str(values.get("status", "failed"))
         cost = await self._usage.job_cost(job_id)
         if status == "done":
+            transcript = list(values.get("transcript", []))
+            from app.services.audit import chain_transcript
+
             await self._jobs.set_result(
                 workspace_id,
                 job_id,
                 {
                     "report": values.get("final_report"),
+                    "audit_root": values.get("audit_root"),
+                    "audit_entries": [
+                        e.model_dump() for e in chain_transcript(transcript)
+                    ],
                     "transcript": [
-                        m.model_dump(mode="json")
-                        for m in values.get("transcript", [])
+                        m.model_dump(mode="json") for m in transcript
                     ],
                     "debate_rounds": values.get("debate_round", 0),
                     "duration_seconds": round(time.monotonic() - started, 3),
