@@ -51,11 +51,15 @@ class ResearcherWorker:
         self._max_queries = max_queries
         self._max_results = max_results_per_query
 
-    def _plan_prompt(self, brief: Brief) -> str:
+    def _plan_prompt(self, brief: Brief, mandate: str = "") -> str:
         reqs = "\n".join(f"- {r}" for r in brief.requirements) or "- (none given)"
+        tenant = f"Client context: {brief.tenant_context}\n" if brief.tenant_context else ""
+        mandate_line = f"Research mandate: {mandate}\n" if mandate else ""
         return (
             f"Report topic: {brief.topic}\n"
-            f"Audience: {brief.audience}\nTone: {brief.tone}\n"
+            f"Report type: {brief.report_type}\n"
+            f"Audience: {brief.audience}\nTone: {brief.tone}\n{tenant}"
+            f"{mandate_line}"
             f"Requirements:\n{reqs}\n"
             f"Language: {brief.language}"
         )
@@ -83,6 +87,7 @@ class ResearcherWorker:
 
     async def run(self, state: dict[str, Any]) -> StateUpdate:
         brief: Brief = state["brief"]
+        mandate = str(state.get("mandate") or "")
         from app.core.cost_tracking import tracked_structured
 
         plan = await tracked_structured(
@@ -91,8 +96,8 @@ class ResearcherWorker:
             role=self.name,
             model="",
             system=RESEARCHER_SYSTEM.format(max_queries=self._max_queries),
-            user=self._plan_prompt(brief),
-            context={"brief": brief.model_dump()},
+            user=self._plan_prompt(brief, mandate),
+            context={"brief": brief.model_dump(), "mandate": mandate},
         )
         queries = plan.queries[: self._max_queries]
 

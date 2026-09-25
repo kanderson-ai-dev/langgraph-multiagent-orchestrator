@@ -39,6 +39,18 @@ class WorkerRegistry:
     def names(self) -> list[str]:
         return list(self._workers)
 
+    def view(self, names: list[str]) -> "WorkerRegistry":
+        """Return a registry limited to ``names`` — the job's active team.
+
+        Unknown names are skipped so a stale ``team`` in state can never
+        resurrect an unregistered worker.
+        """
+        v = WorkerRegistry()
+        for n in names:
+            if n in self._workers:
+                v._workers[n] = self._workers[n]
+        return v
+
     def catalog(self) -> str:
         """Render the worker list for the Supervisor's routing prompt."""
         return "\n".join(

@@ -50,10 +50,22 @@ def make_llm_decider(llm: StructuredLLM) -> RouterDecider:
     return decide
 
 
+# Roles that are always part of a team's backbone; anything else in the
+# registry is a specialist analyst that runs once, between evidence and draft.
+_CORE = {"researcher", "writer", "reviewer"}
+
+
 def rule_based_decider(state: dict[str, Any], registry: WorkerRegistry) -> RoutingDecision:
     """Deterministic decider for offline/CI runs — same flow, no LLM spend."""
     if not state.get("evidence") and "researcher" in registry:
         return RoutingDecision(next_worker="researcher", reason="no evidence yet")
+    # Specialists run once each, after evidence and before drafting.
+    done = {n.analyst for n in state.get("analyst_notes", [])}
+    for name in registry.names():
+        if name not in _CORE and name not in done:
+            return RoutingDecision(
+                next_worker=name, reason=f"specialist analysis pending: {name}"
+            )
     if not state.get("drafts") and "writer" in registry:
         return RoutingDecision(next_worker="writer", reason="evidence ready, no draft")
     if state.get("latest_verdict") is None and "reviewer" in registry:

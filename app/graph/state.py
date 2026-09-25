@@ -9,9 +9,19 @@ from typing import Annotated, Literal, TypedDict, TypeVar
 
 from pydantic import BaseModel, Field
 
-JobStatus = Literal["queued", "running", "awaiting_review", "done", "failed", "blocked"]
-AgentRole = Literal["supervisor", "researcher", "writer", "reviewer"]
+JobStatus = Literal[
+    "queued", "running", "awaiting_review", "done", "failed", "blocked"
+]
 Verdict = Literal["approve", "revise"]
+
+# Report types a tenant can order; each maps to a different agent team.
+ReportType = Literal[
+    "general",
+    "market_intelligence",
+    "vendor_assessment",
+    "competitive_landscape",
+    "technical_due_diligence",
+]
 
 _T = TypeVar("_T")
 
@@ -30,6 +40,16 @@ class Brief(BaseModel):
     requirements: list[str] = Field(default_factory=list, max_length=20)
     source_urls: list[str] = Field(default_factory=list, max_length=20)
     language: str = Field(default="en", max_length=10)
+    report_type: ReportType = "general"
+    tenant_context: str = Field(
+        default="",
+        max_length=2000,
+        description="Client company profile that orients research and writing",
+    )
+    budget_usd: float | None = Field(
+        default=None, ge=0.0,
+        description="Hard LLM-spend cap for this job; None = workspace default",
+    )
 
 
 class EvidenceItem(BaseModel):
@@ -72,6 +92,15 @@ class ReviewVerdict(BaseModel):
     unsupported_citations: int = Field(default=0, ge=0)
 
 
+class AnalystNote(BaseModel):
+    """A specialist worker's structured take on the gathered evidence."""
+
+    analyst: str
+    findings: list[str] = Field(default_factory=list)
+    flags: list[str] = Field(default_factory=list)
+    recommendation: str = ""
+
+
 class AgentMessage(BaseModel):
     """One entry in the inter-agent transcript (the Supervisor-Workers debate)."""
 
@@ -94,9 +123,17 @@ class OrchestrationState(TypedDict, total=False):
     evidence: Annotated[list[EvidenceItem], accumulate]
     drafts: Annotated[list[ReportDraft], accumulate]
     transcript: Annotated[list[AgentMessage], accumulate]
+    analyst_notes: Annotated[list[AnalystNote], accumulate]
     debate_round: int
     max_debate_rounds: int
     latest_verdict: ReviewVerdict | None
     next_worker: str | None
     final_report: str | None
     errors: Annotated[list[str], accumulate]
+    # Orchestration bookkeeping
+    team: list[str]  # worker names active for this job's report_type
+    dispatches: int  # worker dispatches used so far (supervisor bound)
+    mandate: str  # transient: mandate for a dispatched worker (fan-out)
+    pending_sends: list[dict[str, str]]  # transient: fan-out dispatches
+    cost_so_far: float
+    audit_root: str | None

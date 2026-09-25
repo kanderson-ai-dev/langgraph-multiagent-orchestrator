@@ -72,8 +72,10 @@ class ReviewerWorker:
             f"- [{c.source_url}] {c.claim} (quote: {c.quote[:120]}…)" for c in kept
         ) or "(no supported citations)"
         return (
-            f"Brief — topic: {brief.topic}; audience: {brief.audience}; "
-            f"tone: {brief.tone}\nRequirements:\n{reqs}\n\n"
+            f"Brief — topic: {brief.topic}; type: {brief.report_type}; "
+            f"audience: {brief.audience}; tone: {brief.tone}\n"
+            + (f"Client context: {brief.tenant_context}\n" if brief.tenant_context else "")
+            + f"Requirements:\n{reqs}\n\n"
             f"Draft v{draft.version} title: {draft.title}\n\n"
             f"{draft.markdown}\n\nSupported citations:\n{cites}"
         )

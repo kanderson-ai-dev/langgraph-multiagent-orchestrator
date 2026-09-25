@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import Settings, get_settings
 from app.core.dependencies import RequestContext, get_context, get_rate_limiter
@@ -23,12 +23,15 @@ router = APIRouter(prefix="/orchestration", tags=["orchestration"])
 
 
 class SubmitRequest(BaseModel):
-    topic: str
+    topic: str = Field(min_length=3, max_length=500)
     audience: str = "general business"
     tone: str = "analytical"
     requirements: list[str] = []
     source_urls: list[str] = []
     language: str = "en"
+    report_type: str = "general"
+    tenant_context: str = ""
+    budget_usd: float | None = Field(default=None, ge=0.0)
 
 
 class ReviewRequest(BaseModel):
@@ -70,7 +73,10 @@ async def submit(
     if not limiter.allow(f"submit:{client}"):
         raise HTTPException(status_code=429, detail="too many requests")
 
-    brief = Brief.model_validate(body.model_dump())
+    try:
+        brief = Brief.model_validate(body.model_dump())
+    except ValidationError:
+        raise HTTPException(status_code=422, detail="invalid brief") from None
     job = await _jobs(request).create(ctx.workspace_id, brief)
     await _runner(request).submit(job.job_id, ctx.workspace_id, brief)
     return _record_to_response(job)

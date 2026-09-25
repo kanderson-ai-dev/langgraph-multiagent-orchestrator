@@ -11,7 +11,15 @@ from pydantic import BaseModel, Field
 
 from app.framework.worker import StateUpdate
 from app.graph.prompts import WRITER_SYSTEM
-from app.graph.state import AgentMessage, Brief, Citation, EvidenceItem, ReportDraft
+from app.graph.state import (
+    AgentMessage,
+    AnalystNote,
+    Brief,
+    Citation,
+    EvidenceItem,
+    ReportDraft,
+)
+from app.graph.teams import SECTION_TEMPLATES
 from app.services.llm_client import StructuredLLM
 
 
@@ -44,6 +52,24 @@ class WriterWorker:
             f"[source {i}] {e.url}\n{e.text[:1500]}" for i, e in enumerate(evidence)
         ) or "(no evidence gathered)"
         reqs = "\n".join(f"- {r}" for r in brief.requirements) or "- (none)"
+        template = SECTION_TEMPLATES.get(
+            brief.report_type, SECTION_TEMPLATES["general"]
+        )
+        tenant = (
+            f"\nClient context (orient the report to them): {brief.tenant_context}"
+            if brief.tenant_context
+            else ""
+        )
+
+        notes: list[AnalystNote] = state.get("analyst_notes", [])
+        notes_block = ""
+        if notes:
+            rendered = "\n".join(
+                f"[{n.analyst}] findings: {'; '.join(n.findings)}; "
+                f"flags: {'; '.join(n.flags)}; recommendation: {n.recommendation}"
+                for n in notes
+            )
+            notes_block = f"\n\nSpecialist analyst notes:\n{rendered}"
 
         feedback = ""
         if verdict is not None and verdict.feedback:
@@ -55,8 +81,11 @@ class WriterWorker:
         return (
             f"Topic: {brief.topic}\nAudience: {brief.audience}\n"
             f"Tone: {brief.tone}\nLanguage: {brief.language}\n"
+            f"Report type: {brief.report_type}\n"
+            f"Required section structure: {template}{tenant}\n"
             f"Requirements:\n{reqs}\n\n"
             f"Evidence (cite only from these sources):\n{ev_block}"
+            f"{notes_block}"
             f"{feedback}"
         )
 

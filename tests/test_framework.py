@@ -104,16 +104,37 @@ async def test_supervisor_clamps_illegal_route() -> None:
 
 
 async def test_supervisor_dispatch_budget_bounds_loops() -> None:
-    """Guaranteed termination: even a decider that always routes onward stops."""
+    """Guaranteed termination: even a decider that always routes onward stops.
+    The dispatch count lives in state — the Supervisor stays stateless and
+    safe to share across concurrent jobs."""
     reg = _registry("looper")
 
     async def always_onward(state: dict[str, Any], r: WorkerRegistry) -> RoutingDecision:
         return RoutingDecision(next_worker="looper", reason="again")
 
     sup = Supervisor(reg, always_onward, max_dispatches=5)
-    seen = [await sup.decide({}) for _ in range(10)]
+    state: dict[str, Any] = {}
+    seen = []
+    for _ in range(10):
+        d = await sup.decide(state)
+        seen.append(d)
+        if not d.finished:
+            state["dispatches"] = state.get("dispatches", 0) + 1
     assert all(d.next_worker == "looper" for d in seen[:5])
     assert all(d.finished for d in seen[5:])
+
+
+async def test_supervisor_respects_team_view() -> None:
+    """A narrowed registry (the job's team) clamps routes outside the team."""
+    reg = _registry("researcher", "writer", "financial_analyst")
+
+    async def wants_specialist(state: dict[str, Any], r: WorkerRegistry) -> RoutingDecision:
+        return RoutingDecision(next_worker="financial_analyst")
+
+    sup = Supervisor(reg, wants_specialist)
+    team = reg.view(["researcher", "writer"])  # specialist not in this team
+    d = await sup.decide({}, registry=team)
+    assert d.finished and "clamped" in d.reason
 
 
 async def test_supervisor_decider_error_fails_safe() -> None:

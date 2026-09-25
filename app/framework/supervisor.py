@@ -44,6 +44,11 @@ class Supervisor:
       invent a node;
     - ``max_dispatches`` bounds the total number of worker dispatches per
       job, so a misbehaving decider cannot loop forever.
+
+    The Supervisor is *stateless*: the dispatch count lives in the shared
+    state (``dispatches``), so one compiled graph can serve many concurrent
+    jobs safely. Per-job team restriction is done by passing a narrowed
+    registry (``WorkerRegistry.view``) to ``decide``.
     """
 
     def __init__(
@@ -56,17 +61,20 @@ class Supervisor:
         self.registry = registry
         self._decider = decider
         self.max_dispatches = max_dispatches
-        self._dispatches = 0
 
-    async def decide(self, state: dict[str, Any]) -> RoutingDecision:
+    async def decide(
+        self, state: dict[str, Any], registry: WorkerRegistry | None = None
+    ) -> RoutingDecision:
         """Ask the decider for the next worker, then clamp to legal targets."""
-        if self._dispatches >= self.max_dispatches:
+        allowed = registry or self.registry
+        used = int(state.get("dispatches", 0))
+        if used >= self.max_dispatches:
             return RoutingDecision(
                 next_worker=FINISH,
                 reason=f"dispatch budget exhausted ({self.max_dispatches})",
             )
         try:
-            decision_or_coro = self._decider(state, self.registry)
+            decision_or_coro = self._decider(state, allowed)
             decision = (
                 await decision_or_coro
                 if isinstance(decision_or_coro, Awaitable)
@@ -74,11 +82,9 @@ class Supervisor:
             )
         except Exception as exc:  # decider failure must never crash the graph
             return RoutingDecision(next_worker=FINISH, reason=f"decider error: {exc!r}")
-        if decision.next_worker != FINISH and decision.next_worker not in self.registry:
+        if decision.next_worker != FINISH and decision.next_worker not in allowed:
             return RoutingDecision(
                 next_worker=FINISH,
                 reason=f"illegal route {decision.next_worker!r} clamped to FINISH",
             )
-        if not decision.finished:
-            self._dispatches += 1
         return decision

@@ -30,11 +30,13 @@ from app.framework import (
     decide_next_after_verdict,
 )
 from app.graph.deciders import make_llm_decider, rule_based_decider
-from app.graph.nodes.researcher import ResearcherWorker, ResearchPlan
-from app.graph.nodes.reviewer import ReviewerWorker, ReviewOutput
-from app.graph.nodes.writer import DraftOutput, WriterWorker
+from app.graph.nodes.researcher import ResearchPlan
+from app.graph.nodes.reviewer import ReviewOutput
+from app.graph.nodes.specialist import SpecialistAnalysis
+from app.graph.nodes.writer import DraftOutput
 from app.graph.report_assembler import assemble_report
 from app.graph.state import AgentMessage, OrchestrationState
+from app.graph.teams import build_all_workers, team_for
 from app.services.llm_client import StructuredLLM, StubLLM
 from app.services.scraper_client import ScraperClient
 from app.services.search_client import SearchClient
@@ -84,6 +86,14 @@ def _register_stub_builders(llm: StubLLM) -> None:
             verdict="approve", score=4.0, rubric={"structure": 4.0}
         ),
     )
+    llm.register_default(
+        "SpecialistAnalysis",
+        lambda s, c: SpecialistAnalysis(
+            findings=["offline stub finding"],
+            flags=[],
+            recommendation="offline stub recommendation",
+        ),
+    )
 
 
 def build_graph(
@@ -97,14 +107,14 @@ def build_graph(
     """Compile the orchestration graph. Injectable deps keep it testable."""
 
     registry = WorkerRegistry()
-    registry.register(
-        ResearcherWorker(
-            llm, search, scraper,
-            max_queries=settings.max_sub_questions,
-        )
-    )
-    writer = registry.register(WriterWorker(llm))
-    reviewer = registry.register(ReviewerWorker(llm))
+    # Every known worker is a node; each job's `team` (from report_type)
+    # narrows what the Supervisor may route to.
+    for worker in build_all_workers(
+        llm=llm, search=search, scraper=scraper, settings=settings
+    ):
+        registry.register(worker)
+    writer = registry.get("writer")
+    reviewer = registry.get("reviewer")
 
     if isinstance(llm, StubLLM):
         _register_stub_builders(llm)
@@ -160,7 +170,9 @@ def build_graph(
                 )
                 reason = f"verdict={verdict.verdict} round={rounds}/{max_rounds}"
         else:
-            decision = await supervisor.decide(dict(state))
+            # The decider only sees (and may only pick) this job's team.
+            team_registry = registry.view(state.get("team") or registry.names())
+            decision = await supervisor.decide(dict(state), registry=team_registry)
             nxt = decision.next_worker
             reason = decision.reason
 
@@ -170,6 +182,8 @@ def build_graph(
             content=reason or f"routing to {target}",
         )
         update: dict[str, Any] = {"next_worker": target, "transcript": [msg]}
+        if target in registry:
+            update["dispatches"] = state.get("dispatches", 0) + 1
         if target == "human_review":
             # Persist the escalation *before* the interrupt so the checkpoint
             # already reflects awaiting_review when the graph pauses.
@@ -328,10 +342,15 @@ def initial_state(
         "evidence": [],
         "drafts": [],
         "transcript": [],
+        "analyst_notes": [],
         "debate_round": 0,
         "max_debate_rounds": max_debate_rounds,
         "latest_verdict": None,
         "next_worker": None,
         "final_report": None,
         "errors": [],
+        "team": team_for(brief.report_type),
+        "dispatches": 0,
+        "cost_so_far": 0.0,
+        "audit_root": None,
     }
