@@ -1,0 +1,85 @@
+[project]
+name = "langgraph-multiagent-orchestrator"
+version = "0.1.0"
+description = "Supervisor-Workers multi-agent B2B report orchestration microservice (FastAPI + LangGraph)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "aiosqlite>=0.21.0",
+    "bcrypt>=4.3.0",
+    "beautifulsoup4>=4.13.0",
+    "ddgs>=9.0.0",
+    "fastapi>=0.115.0",
+    "httpx>=0.28.0",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.3.0",
+    "langgraph>=0.6.0",
+    "langgraph-checkpoint-sqlite>=2.0.0",
+    "lxml>=5.3.0",
+    "pdfplumber>=0.11.0",
+    "prometheus-fastapi-instrumentator>=7.0.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "pyjwt>=2.10.0",
+    "pypdf>=5.0.0",
+    "structlog>=25.0.0",
+    "tenacity>=9.0.0",
+    "uvicorn[standard]>=0.32.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.14.0",
+    "pip-audit>=2.7.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "respx>=0.22.0",
+    "ruff>=0.9.0",
+    "types-beautifulsoup4>=4.12.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests", "evaluation"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "requires_openai_key: needs a real OPENAI_API_KEY",
+    "requires_search_api: needs a real SEARCH_API_KEY",
+    "requires_langsmith_key: needs a real LANGCHAIN_API_KEY",
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+packages = ["app"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = ["pdfplumber.*", "ddgs.*", "langgraph_checkpoint_sqlite.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]

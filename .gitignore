@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Tooling
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Secrets & local data — never commit
+.env
+.env.*
+!.env.example
+data/
+*.sqlite
+*.sqlite3
+
+# Internal planning/reference docs — never reach the public repo
+PLAN.md
+AGENTS.md
+README-agentic-*.md
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
