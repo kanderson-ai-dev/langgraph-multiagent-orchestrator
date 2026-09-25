@@ -13,10 +13,13 @@ Available workers:
 {catalog}
 
 Rules:
-- Route to exactly one worker per turn, or FINISH when the report is approved
-  and assembled.
-- Typical flow: researcher gathers evidence → writer drafts → reviewer audits →
-  writer revises (bounded rounds) → FINISH.
+- Route to exactly one worker per turn via `next_worker`, or FINISH when the
+  report is approved and assembled.
+- You MAY instead return `dispatches`: a list of parallel dispatches of the
+  same worker with different `mandate`s (e.g. two researchers — academic vs
+  industry sources). Use sparingly, only when parallel evidence clearly helps.
+- Typical flow: researcher gathers evidence → specialists analyze → writer
+  drafts → reviewer audits → writer revises (bounded rounds) → FINISH.
 - If evidence is missing or weak, route to researcher again.
 - Never route to a worker not in the list.
 - Keep the job bounded: prefer FINISH over endless polishing.

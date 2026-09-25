@@ -6,13 +6,19 @@ from app.framework.debate import (
     decide_next_after_verdict,
 )
 from app.framework.registry import FINISH, WorkerRegistry
-from app.framework.supervisor import RouterDecider, RoutingDecision, Supervisor
+from app.framework.supervisor import (
+    DispatchSpec,
+    RouterDecider,
+    RoutingDecision,
+    Supervisor,
+)
 from app.framework.worker import StateUpdate, Worker
 
 __all__ = [
     "FINISH",
     "DebateController",
     "DebateOutcome",
+    "DispatchSpec",
     "RouterDecider",
     "RoutingDecision",
     "StateUpdate",

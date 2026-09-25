@@ -24,6 +24,7 @@ from langgraph.graph.state import CompiledStateGraph
 from app.core.config import Settings
 from app.framework import (
     FINISH,
+    RouterDecider,
     Supervisor,
     Worker,
     WorkerRegistry,
@@ -103,6 +104,7 @@ def build_graph(
     search: SearchClient,
     scraper: ScraperClient,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
+    decider: RouterDecider | None = None,
 ) -> CompiledStateGraph[Any]:
     """Compile the orchestration graph. Injectable deps keep it testable."""
 
@@ -119,7 +121,12 @@ def build_graph(
     if isinstance(llm, StubLLM):
         _register_stub_builders(llm)
 
-    decider = rule_based_decider if isinstance(llm, StubLLM) else make_llm_decider(llm)
+    if decider is None:
+        decider = (
+            rule_based_decider
+            if isinstance(llm, StubLLM)
+            else make_llm_decider(llm)
+        )
     supervisor = Supervisor(registry, decider, max_dispatches=25)
 
     async def input_guardrail_node(state: OrchestrationState) -> dict[str, Any]:
@@ -182,6 +189,24 @@ def build_graph(
             # The decider only sees (and may only pick) this job's team.
             team_registry = registry.view(state.get("team") or registry.names())
             decision = await supervisor.decide(dict(state), registry=team_registry)
+            if decision.dispatches:
+                # Dynamic fan-out: the supervisor chose parallel dispatches.
+                sends = [d.model_dump() for d in decision.dispatches]
+                msgs = [
+                    AgentMessage(
+                        sender="supervisor", recipient=d.worker,
+                        kind="dispatch",
+                        content=d.mandate or d.reason or f"parallel {d.worker}",
+                        round=rounds,
+                    )
+                    for d in decision.dispatches
+                ]
+                return {
+                    "pending_sends": sends,
+                    "next_worker": None,
+                    "dispatches": state.get("dispatches", 0) + len(sends),
+                    "transcript": msgs,
+                }
             nxt = decision.next_worker
             reason = decision.reason
 
@@ -190,7 +215,11 @@ def build_graph(
             sender="supervisor", recipient=target, kind="dispatch",
             content=reason or f"routing to {target}",
         )
-        update: dict[str, Any] = {"next_worker": target, "transcript": [msg]}
+        update: dict[str, Any] = {
+            "next_worker": target,
+            "pending_sends": [],
+            "transcript": [msg],
+        }
         if target in registry:
             update["dispatches"] = state.get("dispatches", 0) + 1
         if target == "human_review":
@@ -353,8 +382,28 @@ def build_graph(
         route_after_guardrail,
         {"supervisor": "supervisor", "rejection_output": "rejection_output"},
     )
+    def route_from_supervisor(state: OrchestrationState) -> Any:
+        """Fan-out wins: pending dispatches become parallel ``Send``s whose
+        per-instance state carries the supervisor-assigned mandate."""
+        from langgraph.types import Send
+
+        sends = state.get("pending_sends") or []
+        if sends:
+            return [
+                Send(
+                    d["worker"],
+                    {
+                        **dict(state),
+                        "mandate": d.get("mandate", ""),
+                        "pending_sends": [],
+                    },
+                )
+                for d in sends
+            ]
+        return state.get("next_worker") or END
+
     builder.add_conditional_edges(
-        "supervisor", lambda s: s["next_worker"], _supervisor_targets(registry)
+        "supervisor", route_from_supervisor, _supervisor_targets(registry)
     )
     for worker in registry:
         builder.add_edge(worker.name, "supervisor")

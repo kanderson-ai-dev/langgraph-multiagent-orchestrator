@@ -31,6 +31,11 @@ def accumulate(existing: list[_T] | None, incoming: list[_T]) -> list[_T]:
     return [*(existing or []), *incoming]
 
 
+def keep_max(existing: float | None, incoming: float) -> float:
+    """Reducer for monotonic values (cost): parallel writes keep the max."""
+    return max(existing or 0.0, incoming)
+
+
 class Brief(BaseModel):
     """User-supplied report brief — the input contract for an orchestration job."""
 
@@ -119,7 +124,7 @@ class OrchestrationState(TypedDict, total=False):
     workspace_id: str
     brief: Brief
     status: JobStatus
-    sub_questions: list[str]
+    sub_questions: Annotated[list[str], accumulate]
     evidence: Annotated[list[EvidenceItem], accumulate]
     drafts: Annotated[list[ReportDraft], accumulate]
     transcript: Annotated[list[AgentMessage], accumulate]
@@ -135,7 +140,7 @@ class OrchestrationState(TypedDict, total=False):
     dispatches: int  # worker dispatches used so far (supervisor bound)
     mandate: str  # transient: mandate for a dispatched worker (fan-out)
     pending_sends: list[dict[str, str]]  # transient: fan-out dispatches
-    cost_so_far: float
+    cost_so_far: Annotated[float, keep_max]
     budget_usd: float | None  # hard LLM-spend cap; None = unlimited
     escalation_reason: str | None  # "debate_rounds" | "budget"
     audit_root: str | None

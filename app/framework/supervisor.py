@@ -18,15 +18,36 @@ from pydantic import BaseModel, Field
 from app.framework.registry import FINISH, WorkerRegistry
 
 
-class RoutingDecision(BaseModel):
-    """The Supervisor's choice for the next step."""
+class DispatchSpec(BaseModel):
+    """One dispatch inside a parallel fan-out decision."""
 
-    next_worker: str = Field(description="Worker name to dispatch, or FINISH")
+    worker: str = Field(description="Registered worker name to dispatch")
+    mandate: str = Field(
+        default="", description="Scoped mandate for this parallel instance"
+    )
+    reason: str = Field(default="")
+
+
+class RoutingDecision(BaseModel):
+    """The Supervisor's choice for the next step.
+
+    Either a single hop (``next_worker``) or a parallel fan-out
+    (``dispatches``, e.g. two researchers with different mandates — the
+    supervisor decides *when* to parallelize, not a hardcoded edge).
+    """
+
+    next_worker: str = Field(
+        default=FINISH, description="Worker name to dispatch, or FINISH"
+    )
+    dispatches: list[DispatchSpec] = Field(
+        default_factory=list,
+        description="Parallel dispatches; when set, next_worker is ignored",
+    )
     reason: str = Field(default="", description="Why this worker is needed now")
 
     @property
     def finished(self) -> bool:
-        return self.next_worker == FINISH
+        return not self.dispatches and self.next_worker == FINISH
 
 
 RouterDecider = Callable[
@@ -82,6 +103,18 @@ class Supervisor:
             )
         except Exception as exc:  # decider failure must never crash the graph
             return RoutingDecision(next_worker=FINISH, reason=f"decider error: {exc!r}")
+        if decision.dispatches:
+            # Fan-out: keep only legal targets, bounded by remaining budget.
+            valid = [d for d in decision.dispatches if d.worker in allowed]
+            remaining = self.max_dispatches - used
+            valid = valid[: max(remaining, 0)]
+            if not valid:
+                return RoutingDecision(
+                    next_worker=FINISH,
+                    reason="all fan-out targets illegal or dispatch budget spent",
+                )
+            decision.dispatches = valid
+            return decision
         if decision.next_worker != FINISH and decision.next_worker not in allowed:
             return RoutingDecision(
                 next_worker=FINISH,
