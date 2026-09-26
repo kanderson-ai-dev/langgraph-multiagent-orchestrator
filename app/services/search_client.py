@@ -69,7 +69,13 @@ class TavilySearchClient:
 
 
 class DuckDuckGoSearchClient:
-    """Keyless fallback via the ``ddgs`` package (sync lib → thread)."""
+    """Keyless fallback via the ``ddgs`` package (sync lib → thread).
+
+    The backend list is bounded on purpose: ``backend="auto"`` rotates through
+    every engine ``ddgs`` knows, which added tens of seconds per query.
+    """
+
+    _BACKENDS = "duckduckgo,brave,yahoo"
 
     def __init__(self, *, timeout: float = 15.0) -> None:
         self._timeout = timeout
@@ -85,7 +91,9 @@ class DuckDuckGoSearchClient:
                         url=str(r.get("href", "")),
                         snippet=str(r.get("body", "")),
                     )
-                    for r in ddgs.text(query, max_results=max_results)
+                    for r in ddgs.text(
+                        query, max_results=max_results, backend=self._BACKENDS
+                    )
                 ]
 
         return await asyncio.to_thread(_sync_search)

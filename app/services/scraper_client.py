@@ -49,6 +49,12 @@ class ScraperClient:
         self._client = client
         self._last_fetch: dict[str, float] = defaultdict(float)
         self._robots: dict[str, urllib.robotparser.RobotFileParser | None] = {}
+        # Concurrency is safe: the semaphore bounds total in-flight fetches,
+        # and per-domain/per-origin locks keep politeness spacing and the
+        # robots cache correct when callers gather many URLs at once.
+        self._semaphore = asyncio.Semaphore(settings.scrape_max_concurrency)
+        self._domain_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._robots_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     def _validate_url(self, url: str) -> str:
         parsed = urllib.parse.urlparse(url)
@@ -70,15 +76,20 @@ class ScraperClient:
         parsed = urllib.parse.urlparse(url)
         origin = f"{parsed.scheme}://{parsed.netloc}"
         if origin not in self._robots:
-            candidate = urllib.robotparser.RobotFileParser()
-            candidate.set_url(f"{origin}/robots.txt")
-            try:
-                await asyncio.to_thread(candidate.read)
-            except Exception:  # unreadable robots.txt → allow, logged
-                self._robots[origin] = None
-                logger.info("robots_txt_unreadable", origin=origin)
-            else:
-                self._robots[origin] = candidate
+            async with self._robots_locks[origin]:
+                if origin not in self._robots:  # re-check inside the lock
+                    candidate = urllib.robotparser.RobotFileParser()
+                    candidate.set_url(f"{origin}/robots.txt")
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(candidate.read),
+                            timeout=self._settings.scrape_timeout_seconds,
+                        )
+                    except Exception:  # unreadable robots.txt → allow, logged
+                        self._robots[origin] = None
+                        logger.info("robots_txt_unreadable", origin=origin)
+                    else:
+                        self._robots[origin] = candidate
         rp = self._robots[origin]
         return True if rp is None else rp.can_fetch(_USER_AGENT, url)
 
@@ -86,10 +97,13 @@ class ScraperClient:
         parsed = urllib.parse.urlparse(url)
         domain = parsed.netloc
         delay = self._settings.scrape_delay_seconds
-        elapsed = time.monotonic() - self._last_fetch[domain]
-        if elapsed < delay:
-            await asyncio.sleep(delay - elapsed)
-        self._last_fetch[domain] = time.monotonic()
+        # The per-domain lock makes same-domain calls queue properly — each
+        # waits its turn instead of racing to update _last_fetch together.
+        async with self._domain_locks[domain]:
+            elapsed = time.monotonic() - self._last_fetch[domain]
+            if elapsed < delay:
+                await asyncio.sleep(delay - elapsed)
+            self._last_fetch[domain] = time.monotonic()
 
     @retry(
         retry=retry_if_exception_type((httpx.TimeoutException, httpx.TransportError)),
@@ -111,9 +125,9 @@ class ScraperClient:
         url = self._validate_url(url)
         if not await self._robots_allowed(url):
             raise ScrapeError(f"robots.txt disallows {url}")
-        await self._polite_delay(url)
-
-        resp = await self._fetch(url)
+        async with self._semaphore:
+            await self._polite_delay(url)
+            resp = await self._fetch(url)
         if resp.status_code >= 400:
             raise ScrapeError(f"HTTP {resp.status_code} for {url}")
         body = resp.content[: self._settings.scrape_max_bytes]

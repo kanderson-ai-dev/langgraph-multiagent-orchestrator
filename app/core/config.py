@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     scrape_timeout_seconds: float = Field(default=15.0, gt=0.0)
     scrape_max_bytes: int = Field(default=1_048_576, gt=0)
     scrape_respect_robots: bool = True
+    # Bounds total in-flight fetches when callers scrape many URLs in
+    # parallel; per-domain politeness still applies on top.
+    scrape_max_concurrency: int = Field(default=5, ge=1, le=20)
 
     # Orchestration bounds
     max_debate_rounds: int = Field(default=3, ge=0, le=10)

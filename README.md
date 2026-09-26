@@ -138,7 +138,7 @@ metrics that matter in this domain.
 | Task performance | Reviewer rubric (1–5) | avg ≥ 4.0 | **4.500** ✅ |
 | Orchestration health | Debate convergence within `MAX_DEBATE_ROUNDS` | ≥ 0.85 | **1.000** ✅ |
 | Safety | Adversarial briefs blocked | 1.00 | **1.000** ✅ |
-| Latency | Full job wall-clock, live path | p50 ≤ 90s / p95 ≤ 240s | **150–670s observed** ⚠️ — dominated by politeness-delayed live scraping; see Known limitations |
+| Latency | Full job wall-clock, live path | p50 ≤ 90s / p95 ≤ 240s | **~105s to HITL/done observed** (was 150–670s before parallel search+scrape) — converged runs land near the p50 target; see Known limitations |
 | Cost | Per job (all roles, all rounds) | ≤ $0.08 | **$0.010–$0.104 observed** ✅ (upper end = full 3-round debate + fund) |
 | Test coverage | `pytest --cov=app` | ≥ 80% | **90%** ✅ |
 | Static typing | `mypy --strict app/` | 0 errors | **0 errors** ✅ |
@@ -332,10 +332,12 @@ mypy --strict · Playwright · uv · Docker.
 
 ## Known limitations & next steps
 
-- **Live latency exceeds the p50 target** (observed 150–670s vs ≤90s): the
-  bottleneck is the keyless DuckDuckGo path plus politeness-delayed serial
-  scraping — a paid search provider (Tavily) and parallel scrape dispatch
-  are the clear next steps, not more prompt tuning.
+- **Live latency sits near (not under) the p50 target**: parallel search +
+  bounded-concurrency scraping brought wall-clock from 150–670s down to
+  ~105s for a full 3-round debate job. The remaining serial cost is the
+  Writer↔Reviewer debate itself — sequential by design — plus keyless
+  search latency; a paid provider (Tavily) would shave the research phase
+  further.
 - Approving a budget escalation *before any draft exists* terminates the job
   as `failed` — the report assembler has nothing to seal. A friendlier path
   would convert "approve with no draft" into "fund & continue".

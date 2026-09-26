@@ -5,6 +5,7 @@ user-supplied source URLs through the polite client, parses documents, and
 emits ``EvidenceItem``s traceable to a real source URL.
 """
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -104,21 +105,33 @@ class ResearcherWorker:
         candidate_urls: list[tuple[str, str]] = []  # (url, query)
         for url in brief.source_urls:  # user-supplied sources first
             candidate_urls.append((url, "user-supplied"))
-        for q in queries:
-            try:
-                results = await self._search.search(
-                    q, max_results=self._max_results
-                )
-            except Exception as exc:
-                logger.warning("search_failed", query=q, error=str(exc))
+        # Queries are independent — search them concurrently; failures are
+        # logged per query and skipped exactly as before.
+        search_results = await asyncio.gather(
+            *(
+                self._search.search(q, max_results=self._max_results)
+                for q in queries
+            ),
+            return_exceptions=True,
+        )
+        for q, results in zip(queries, search_results, strict=True):
+            if isinstance(results, BaseException):
+                logger.warning("search_failed", query=q, error=str(results))
                 continue
             candidate_urls.extend((r.url, q) for r in results)
 
-        evidence: list[EvidenceItem] = []
-        for url, q in candidate_urls:
-            item = await self._gather_url(url, q)
-            if item is not None:
-                evidence.append(item)
+        # Dedupe (queries often overlap), then scrape concurrently — the
+        # scraper itself bounds in-flight fetches and per-domain politeness.
+        seen: set[str] = set()
+        unique_urls: list[tuple[str, str]] = []
+        for u, q in candidate_urls:
+            if u not in seen:
+                seen.add(u)
+                unique_urls.append((u, q))
+        gathered = await asyncio.gather(
+            *(self._gather_url(u, q) for u, q in unique_urls)
+        )
+        evidence = [item for item in gathered if item is not None]
 
         msg = AgentMessage(
             sender=self.name,
