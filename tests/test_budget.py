@@ -56,7 +56,12 @@ class _SpyLLM(StubLLM):
         self.register(
             "ReviewOutput",
             lambda s, c: ReviewOutput(
-                verdict="approve", score=4.0, rubric={"x": 4.0}
+                verdict="approve",
+                score=4.0,
+                rubric={
+                    "structure": 4.0, "clarity": 4.0, "grounding": 4.0, "tone": 4.0
+                },
+                feedback=[],
             ),
         )
 

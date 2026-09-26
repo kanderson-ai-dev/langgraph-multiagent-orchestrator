@@ -115,7 +115,12 @@ async def test_reviewer_verifies_citations(brief: Brief) -> None:
     stub.register(
         "ReviewOutput",
         lambda s, c: ReviewOutput(
-            verdict="approve", score=4.5, rubric={"clarity": 4.5}
+            verdict="approve",
+            score=4.5,
+            rubric={
+                "structure": 4.5, "clarity": 4.5, "grounding": 4.5, "tone": 4.5
+            },
+            feedback=[],
         ),
     )
     w = ReviewerWorker(llm=stub)

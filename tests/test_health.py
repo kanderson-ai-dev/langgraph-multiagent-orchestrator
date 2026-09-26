@@ -13,7 +13,12 @@ def test_liveness() -> None:
 
 
 def test_readiness_reports_integrations_without_leaking_values() -> None:
-    client = TestClient(create_app())
+    """Isolated from any local .env — integrations must report as disabled."""
+    from app.core.config import Settings, get_settings
+
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
+    client = TestClient(app)
     r = client.get("/health/ready")
     assert r.status_code == 200
     body = r.json()

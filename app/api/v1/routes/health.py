@@ -4,7 +4,7 @@ Readiness reports which optional integrations are configured without leaking
 their values — a credential is either present or absent, never echoed.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.core.config import Settings, get_settings
@@ -24,14 +24,14 @@ class ReadinessStatus(BaseModel):
 
 
 @router.get("/health/live", include_in_schema=False)
-async def liveness() -> HealthStatus:
-    settings = get_settings()
+async def liveness(settings: Settings = Depends(get_settings)) -> HealthStatus:
     return HealthStatus(status="ok", version=settings.app_version)
 
 
 @router.get("/health/ready", include_in_schema=False)
-async def readiness() -> ReadinessStatus:
-    settings: Settings = get_settings()
+async def readiness(
+    settings: Settings = Depends(get_settings),
+) -> ReadinessStatus:
     return ReadinessStatus(
         status="ok",
         version=settings.app_version,

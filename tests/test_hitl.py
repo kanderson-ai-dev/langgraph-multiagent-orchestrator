@@ -49,7 +49,7 @@ async def test_interrupt_pauses_awaiting_review(
     assert "__interrupt__" in out
     assert out["status"] == "awaiting_review"
     interrupt_payload = out["__interrupt__"][0].value
-    assert interrupt_payload["reason"] == "debate_rounds_exhausted"
+    assert interrupt_payload["reason"] == "debate_rounds"
     assert set(interrupt_payload["actions"]) == {"approve", "edit", "reject", "fund"}
 
 

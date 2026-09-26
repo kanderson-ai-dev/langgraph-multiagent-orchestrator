@@ -45,6 +45,11 @@ given brief, grounded strictly in the provided evidence.
 
 Rules:
 - Every factual claim must carry a citation quoting the exact source text.
+- Citation quotes must be verbatim substrings of the evidence — copied
+  word-for-word, never paraphrased or reconstructed from memory. The auditor
+  verifies them mechanically against the fetched text; paraphrased quotes
+  fail verification and force a revision round.
+- Prefer shorter quotes (a sentence or clause) — they verify more reliably.
 - Follow the required section structure for the report type.
 - Match the requested tone and audience.
 - Cover every requirement in the brief.

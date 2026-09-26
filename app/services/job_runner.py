@@ -162,7 +162,17 @@ class JobRunner:
             return
         for node, update in chunk.items():
             if node == "__interrupt__":
-                self._emit(job_id, {"node": "human_review", "interrupt": True})
+                # The interrupt payload carries the real escalation reason
+                # (budget | debate_rounds) — surface it to SSE subscribers.
+                reason = None
+                intr = update[0] if isinstance(update, list | tuple) else update
+                val = getattr(intr, "value", None)
+                if isinstance(val, dict):
+                    reason = val.get("reason")
+                self._emit(
+                    job_id,
+                    {"node": "human_review", "interrupt": True, "reason": reason},
+                )
                 continue
             msgs = update.get("transcript") if isinstance(update, dict) else None
             self._emit(
@@ -212,11 +222,28 @@ class JobRunner:
                 cost_usd=cost,
                 status="done",
             )
+        elif status == "awaiting_review":
+            # Persist why it escalated — the console/poll shows the real cause.
+            await self._jobs.set_result(
+                workspace_id,
+                job_id,
+                {
+                    "escalation_reason": values.get("escalation_reason"),
+                    "debate_round": values.get("debate_round", 0),
+                    "max_debate_rounds": values.get("max_debate_rounds"),
+                },
+                cost_usd=cost,
+                status="awaiting_review",
+            )
         else:
             await self._jobs.update_status(workspace_id, job_id, status)  # type: ignore[arg-type]
+        # Awaiting review is a pause, not a terminal state — keep the SSE
+        # stream open so subscribers see events after the resume.
+        terminal = status in ("done", "failed", "blocked")
         self._emit(
             job_id,
-            {"node": "runner", "status": status, "terminal": True, "cost_usd": cost},
+            {"node": "runner", "status": status,
+             "terminal": terminal, "cost_usd": cost},
         )
 
     async def cancel(self, job_id: str) -> None:

@@ -83,6 +83,28 @@ async def submit(
     return _record_to_response(job)
 
 
+@router.get("/reports", response_model=list[dict[str, Any]])
+async def list_jobs(
+    request: Request,
+    limit: int = 20,
+    ctx: RequestContext = Depends(get_context),
+) -> list[dict[str, Any]]:
+    """Recent jobs for this workspace, newest first (lightweight summaries)."""
+    jobs = await _jobs(request).list(ctx.workspace_id, limit=min(limit, 100))
+    return [
+        {
+            "job_id": j.job_id,
+            "topic": j.brief.topic,
+            "report_type": j.brief.report_type,
+            "status": j.status,
+            "cost_usd": j.cost_usd,
+            "created_at": j.created_at.isoformat(),
+            "updated_at": j.updated_at.isoformat(),
+        }
+        for j in jobs
+    ]
+
+
 @router.get("/reports/{job_id}", response_model=dict[str, Any])
 async def poll(
     job_id: str,
@@ -92,11 +114,14 @@ async def poll(
     job = await _jobs(request).get(ctx.workspace_id, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
+    from app.graph.teams import team_for
+
     return {
         "job_id": job.job_id,
         "status": job.status,
         "cost_usd": job.cost_usd,
         "brief": job.brief.model_dump(),
+        "team": team_for(job.brief.report_type),
         "result": job.result,
         "created_at": job.created_at.isoformat(),
         "updated_at": job.updated_at.isoformat(),

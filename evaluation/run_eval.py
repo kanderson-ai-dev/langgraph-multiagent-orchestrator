@@ -5,8 +5,9 @@ fixture-based search/scrape (zero network, zero credentials). Exits non-zero
 if any versioned threshold fails — the same gate CI enforces.
 
 Usage:
-    uv run python -m evaluation.run_eval            # evaluate + write scorecard
-    uv run python -m evaluation.run_eval --report   # also refresh TREND.md
+    uv run python -m evaluation.run_eval              # evaluate + write scorecard
+    uv run python -m evaluation.run_eval --report     # also refresh TREND.md
+    uv run python -m evaluation.run_eval --langsmith  # + LangSmith experiment
 """
 
 import argparse
@@ -107,6 +108,7 @@ def _eval_llm() -> StubLLM:
             verdict="approve",
             score=4.5,
             rubric={"structure": 4.5, "clarity": 4.5, "grounding": 4.5, "tone": 4.5},
+            feedback=[],
         ),
     )
     return stub
@@ -195,6 +197,11 @@ def _write_trend(metrics: dict[str, float], results: list[dict[str, Any]]) -> No
 async def _main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", action="store_true", help="write TREND.md")
+    parser.add_argument(
+        "--langsmith",
+        action="store_true",
+        help="also publish the dataset and run a LangSmith experiment",
+    )
     args = parser.parse_args()
 
     settings = Settings(
@@ -216,6 +223,15 @@ async def _main() -> int:
     SCORECARD_PATH.write_text(json.dumps(scorecard, indent=2), encoding="utf-8")
     if args.report:
         _write_trend(metrics, results)
+
+    if args.langsmith:
+        from evaluation.langsmith_eval import run_langsmith_experiment
+
+        name = await asyncio.to_thread(run_langsmith_experiment)
+        if name:
+            print(f"LangSmith experiment published: {name}")
+        else:
+            print("LangSmith skipped: LANGCHAIN_API_KEY not configured")
 
     print("Evaluation scorecard:")
     for k, v in metrics.items():

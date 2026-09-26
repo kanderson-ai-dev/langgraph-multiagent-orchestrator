@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     # Orchestration bounds
     max_debate_rounds: int = Field(default=3, ge=0, le=10)
     max_sub_questions: int = Field(default=5, ge=1, le=10)
+    # Per-worker dispatch cap in free routing: once a worker has been
+    # dispatched this many times it leaves the Supervisor's catalog, so a
+    # decider stuck on "gather more evidence" can never loop a worker.
+    max_worker_dispatches: int = Field(default=3, ge=1, le=20)
 
     # LangSmith (optional)
     langchain_tracing_v2: bool = False

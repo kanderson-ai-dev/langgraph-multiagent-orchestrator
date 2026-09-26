@@ -60,6 +60,7 @@ markers = [
     "requires_openai_key: needs a real OPENAI_API_KEY",
     "requires_search_api: needs a real SEARCH_API_KEY",
     "requires_langsmith_key: needs a real LANGCHAIN_API_KEY",
+    "requires_browser: needs playwright + a chromium/chrome binary",
 ]
 
 [tool.mypy]

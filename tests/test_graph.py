@@ -62,7 +62,12 @@ def _stub_llm(*, verdict: str = "approve") -> StubLLM:
     stub.register(
         "ReviewOutput",
         lambda s, c: ReviewOutput(
-            verdict=verdict, score=4.2, rubric={"clarity": 4.2}
+            verdict=verdict,
+            score=4.2,
+            rubric={
+                "structure": 4.2, "clarity": 4.2, "grounding": 4.2, "tone": 4.2
+            },
+            feedback=[],
         ),
     )
     return stub
@@ -128,3 +133,38 @@ async def test_max_dispatches_bound(brief_kwargs: dict[str, object]) -> None:
     out = await g.ainvoke(state, config={"configurable": {"thread_id": "j3"}})
     # Terminated — never hangs.
     assert out["status"] in ("awaiting_review", "done", "failed")
+
+
+async def test_per_worker_dispatch_cap_stops_research_loop(
+    brief_kwargs: dict[str, object],
+) -> None:
+    """A decider stuck on "gather more evidence" cannot loop a worker:
+    after `max_worker_dispatches` runs it leaves the Supervisor's catalog
+    and routing falls through to FINISH."""
+    from app.framework.supervisor import RoutingDecision
+
+    async def stuck_decider(state: dict[str, Any], registry: Any) -> RoutingDecision:
+        return RoutingDecision(next_worker="researcher", reason="more evidence")
+
+    settings = _settings(max_worker_dispatches=2)
+    g = build_graph(
+        settings,
+        llm=_stub_llm(),
+        search=_FakeSearch(),  # type: ignore[arg-type]
+        scraper=_FakeScraper(),  # type: ignore[arg-type]
+        checkpointer=MemorySaver(),
+        decider=stuck_decider,
+    )
+    state = initial_state(
+        job_id="j4", workspace_id="ws-a",
+        brief=Brief.model_validate(brief_kwargs),
+        max_debate_rounds=settings.max_debate_rounds,
+    )
+    out = await g.ainvoke(state, config={"configurable": {"thread_id": "j4"}})
+    researcher_runs = [
+        m for m in out["transcript"]
+        if m.kind == "dispatch" and m.recipient == "researcher"
+    ]
+    assert len(researcher_runs) == settings.max_worker_dispatches
+    # Once the cap hit, the supervisor finished instead of looping.
+    assert out["status"] in ("done", "failed")

@@ -32,7 +32,7 @@ from app.framework import (
 )
 from app.graph.deciders import make_llm_decider, rule_based_decider
 from app.graph.nodes.researcher import ResearchPlan
-from app.graph.nodes.reviewer import ReviewOutput
+from app.graph.nodes.reviewer import ReviewOutput, Rubric
 from app.graph.nodes.specialist import SpecialistAnalysis
 from app.graph.nodes.writer import DraftOutput
 from app.graph.report_assembler import assemble_report
@@ -84,7 +84,10 @@ def _register_stub_builders(llm: StubLLM) -> None:
     llm.register_default(
         "ReviewOutput",
         lambda s, c: ReviewOutput(
-            verdict="approve", score=4.0, rubric={"structure": 4.0}
+            verdict="approve",
+            score=4.0,
+            rubric=Rubric(structure=4.0, clarity=4.0, grounding=4.0, tone=4.0),
+            feedback=[],
         ),
     )
     llm.register_default(
@@ -184,10 +187,42 @@ def build_graph(
                     max_rounds=max_rounds,
                     proposer=writer.name,
                 )
-                reason = f"verdict={verdict.verdict} round={rounds}/{max_rounds}"
+                if nxt == writer.name:
+                    reason = (
+                        f"Revision requested (round {rounds}/{max_rounds}) — "
+                        "sending the draft back to the Writer."
+                    )
+                elif verdict.verdict == "approve":
+                    reason = "Draft approved — assembling the final report."
+                else:
+                    reason = (
+                        f"Debate budget exhausted ({rounds}/{max_rounds} "
+                        "rounds) — escalating to human review."
+                    )
         else:
-            # The decider only sees (and may only pick) this job's team.
-            team_registry = registry.view(state.get("team") or registry.names())
+            # The decider only sees (and may only pick) this job's team —
+            # minus any worker that already hit its dispatch cap. A worker
+            # that ran `max_worker_dispatches` times leaves the catalog, so
+            # a decider stuck on "gather more evidence" cannot loop it.
+            team = state.get("team") or registry.names()
+            counts: dict[str, int] = {}
+            for m in state.get("transcript", []):
+                if m.kind == "dispatch" and m.sender == "supervisor":
+                    counts[m.recipient] = counts.get(m.recipient, 0) + 1
+            cap = settings.max_worker_dispatches
+            active = [w for w in team if counts.get(w, 0) < cap]
+            if not active:
+                nxt, reason = FINISH, "all team workers reached dispatch cap"
+                target = FINISH
+                msg = AgentMessage(
+                    sender="supervisor", recipient=FINISH, kind="dispatch",
+                    content=reason,
+                )
+                return {
+                    "next_worker": FINISH, "pending_sends": [],
+                    "transcript": [msg],
+                }
+            team_registry = registry.view(active)
             decision = await supervisor.decide(dict(state), registry=team_registry)
             if decision.dispatches:
                 # Dynamic fan-out: the supervisor chose parallel dispatches.
@@ -262,7 +297,7 @@ def build_graph(
         verdict = state.get("latest_verdict")
         decision = interrupt(
             {
-                "reason": "debate_rounds_exhausted",
+                "reason": state.get("escalation_reason") or "debate_rounds",
                 "debate_round": state.get("debate_round", 0),
                 "latest_verdict": verdict.model_dump() if verdict else None,
                 "actions": ["approve", "edit", "reject", "fund"],

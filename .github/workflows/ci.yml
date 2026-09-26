@@ -35,6 +35,11 @@ jobs:
           LANGCHAIN_API_KEY: ""
           JWT_SECRET_KEY: ""
 
+      - name: Browser E2E smoke test (console UI)
+        run: |
+          uv run --with playwright playwright install --with-deps chromium
+          uv run --with playwright pytest tests/test_frontend_e2e.py -v
+
       - name: EDD quality gate
         run: uv run python -m evaluation.run_eval
         env:

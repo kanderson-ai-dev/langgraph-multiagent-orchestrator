@@ -65,7 +65,12 @@ def _stub_llm() -> StubLLM:
     stub.register(
         "ReviewOutput",
         lambda s, c: ReviewOutput(
-            verdict="approve", score=4.4, rubric={"grounding": 4.4}
+            verdict="approve",
+            score=4.4,
+            rubric={
+                "structure": 4.4, "clarity": 4.4, "grounding": 4.4, "tone": 4.4
+            },
+            feedback=[],
         ),
     )
     stub.register(

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Orchestrator — Multi-Agent Report Generation</title>
+  <meta name="description" content="Supervisor–Workers multi-agent orchestration: a Researcher, Writer and Reviewer debate under a Supervisor to produce cited, verified B2B reports." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ink: "#0a0e14",
+            panel: "#11161f",
+            line: "#1e2733",
+            accent: "#5eead4",
+            accent2: "#818cf8",
+            muted: "#8b98a9",
+          },
+          fontFamily: {
+            sans: ["Inter", "system-ui", "sans-serif"],
+            mono: ["JetBrains Mono", "ui-monospace", "monospace"],
+          },
+        },
+      },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body class="bg-ink text-slate-200 font-sans antialiased min-h-screen">
+
+  <!-- Nav -->
+  <header class="border-b border-line/70">
+    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="w-7 h-7 rounded-md bg-gradient-to-br from-accent to-accent2 flex items-center justify-center">
+          <span class="text-ink font-bold text-xs font-mono">S/W</span>
+        </div>
+        <span class="font-semibold tracking-tight">orchestrator</span>
+        <span class="text-[10px] font-mono text-muted border border-line rounded px-1.5 py-0.5 ml-1">v0.1</span>
+      </div>
+      <nav class="flex items-center gap-5 text-sm text-muted">
+        <a href="/console/" class="hover:text-slate-200 transition-colors">Console</a>
+        <a href="/docs" class="hover:text-slate-200 transition-colors">API</a>
+        <a href="/metrics" class="hover:text-slate-200 transition-colors">Metrics</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section class="max-w-6xl mx-auto px-6 pt-20 pb-14">
+    <div class="max-w-3xl">
+      <div class="inline-flex items-center gap-2 text-xs font-mono text-accent border border-accent/25 bg-accent/5 rounded-full px-3 py-1 mb-6">
+        <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse"></span>
+        supervisor · researcher · writer · reviewer · human
+      </div>
+      <h1 class="text-4xl sm:text-5xl font-bold tracking-tight leading-[1.08] text-slate-100">
+        Agents that <span class="text-transparent bg-clip-text bg-gradient-to-r from-accent to-accent2">debate</span>,<br />
+        reports that hold up.
+      </h1>
+      <p class="mt-5 text-lg text-muted leading-relaxed max-w-2xl">
+        A Supervisor routes work between specialist agents. The Writer drafts,
+        the Reviewer verifies every citation against real source text, and they
+        iterate — bounded — until the report passes the bar or a human steps in.
+      </p>
+    </div>
+  </section>
+
+  <!-- Brief form -->
+  <section class="max-w-6xl mx-auto px-6 pb-20">
+    <div class="grid lg:grid-cols-5 gap-8 items-start">
+
+      <form id="brief-form" class="lg:col-span-3 bg-panel border border-line rounded-2xl p-6 sm:p-8 space-y-5">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-muted">New research brief</h2>
+
+        <div>
+          <label for="topic" class="block text-sm font-medium mb-1.5">Topic <span class="text-accent">*</span></label>
+          <input id="topic" name="topic" required minlength="3"
+            placeholder="e.g. Impact of the EU AI Act on early-stage B2B startups"
+            class="w-full bg-ink border border-line rounded-lg px-3.5 py-2.5 text-sm placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40 transition" />
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label for="audience" class="block text-sm font-medium mb-1.5">Audience</label>
+            <input id="audience" name="audience" value="general business"
+              class="w-full bg-ink border border-line rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40 transition" />
+          </div>
+          <div>
+            <label for="tone" class="block text-sm font-medium mb-1.5">Tone</label>
+            <select id="tone" name="tone"
+              class="w-full bg-ink border border-line rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40 transition">
+              <option value="analytical" selected>Analytical</option>
+              <option value="persuasive">Persuasive</option>
+              <option value="executive">Executive</option>
+              <option value="technical">Technical</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label for="report_type" class="block text-sm font-medium mb-1.5">Report type</label>
+            <select id="report_type" name="report_type"
+              class="w-full bg-ink border border-line rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40 transition">
+              <option value="general" selected>General</option>
+              <option value="market_intelligence">Market intelligence</option>
+              <option value="vendor_assessment">Vendor assessment</option>
+              <option value="competitive_landscape">Competitive landscape</option>
+              <option value="technical_due_diligence">Technical due diligence</option>
+            </select>
+          </div>
+          <div>
+            <label for="budget" class="block text-sm font-medium mb-1.5">
+              Budget cap <span class="text-muted font-normal">(USD, optional)</span>
+            </label>
+            <input id="budget" name="budget_usd" type="number" min="0" step="any" placeholder="unlimited"
+              class="w-full bg-ink border border-line rounded-lg px-3.5 py-2.5 text-sm placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40 transition" />
+          </div>
+        </div>
+
+        <div>
+          <label for="tenant_context" class="block text-sm font-medium mb-1.5">
+            Your company context <span class="text-muted font-normal">(optional)</span>
+          </label>
+          <input id="tenant_context" name="tenant_context"
+            placeholder="e.g. Series B fintech evaluating KYC vendors"
+            class="w-full bg-ink border border-line rounded-lg px-3.5 py-2.5 text-sm placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40 transition" />
+        </div>
+
+        <div>
+          <label for="requirements" class="block text-sm font-medium mb-1.5">
+            Requirements <span class="text-muted font-normal">(one per line, optional)</span>
+          </label>
+          <textarea id="requirements" name="requirements" rows="3"
+            placeholder="Executive summary&#10;Cost of compliance&#10;Risks"
+            class="w-full bg-ink border border-line rounded-lg px-3.5 py-2.5 text-sm placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/40 transition resize-y"></textarea>
+        </div>
+
+        <div class="flex items-center gap-4 pt-1">
+          <button type="submit" id="submit-btn"
+            class="inline-flex items-center gap-2 bg-accent text-ink font-semibold text-sm rounded-lg px-5 py-2.5 hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-50 disabled:cursor-not-allowed transition">
+            <span id="btn-label">Generate report</span>
+            <svg id="btn-spin" class="hidden w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" class="opacity-25"/>
+              <path d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <p id="form-error" class="text-sm text-red-400 hidden"></p>
+        </div>
+      </form>
+
+      <!-- How it works -->
+      <aside class="lg:col-span-2 space-y-3">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-muted px-1">The loop</h2>
+        <ol class="space-y-3">
+          <li class="flex gap-3.5 bg-panel/60 border border-line rounded-xl p-4">
+            <span class="font-mono text-accent text-sm pt-0.5">01</span>
+            <div><p class="text-sm font-medium">Supervisor routes</p>
+            <p class="text-xs text-muted mt-1">An LLM supervisor assembles the agent team for the report type, then decides who acts next — no fixed pipeline.</p></div>
+          </li>
+          <li class="flex gap-3.5 bg-panel/60 border border-line rounded-xl p-4">
+            <span class="font-mono text-accent text-sm pt-0.5">02</span>
+            <div><p class="text-sm font-medium">Researcher gathers</p>
+            <p class="text-xs text-muted mt-1">Real web search and scraping, sanitized against prompt injection.</p></div>
+          </li>
+          <li class="flex gap-3.5 bg-panel/60 border border-line rounded-xl p-4">
+            <span class="font-mono text-accent text-sm pt-0.5">03</span>
+            <div><p class="text-sm font-medium">Writer ↔ Reviewer debate</p>
+            <p class="text-xs text-muted mt-1">Drafts are graded on a rubric; every quote is verified against the fetched source. Bounded rounds.</p></div>
+          </li>
+          <li class="flex gap-3.5 bg-panel/60 border border-line rounded-xl p-4">
+            <span class="font-mono text-accent2 text-sm pt-0.5">04</span>
+            <div><p class="text-sm font-medium">Human in the loop</p>
+            <p class="text-xs text-muted mt-1">If the debate stalls or the budget runs out, it escalates — approve, edit, reject or fund more spend.</p></div>
+          </li>
+          <li class="flex gap-3.5 bg-panel/60 border border-line rounded-xl p-4">
+            <span class="font-mono text-accent2 text-sm pt-0.5">05</span>
+            <div><p class="text-sm font-medium">Sealed delivery</p>
+            <p class="text-xs text-muted mt-1">Every report ships with a SHA-256 hash-chained audit trail of the debate that produced it — tamper-evident by construction.</p></div>
+          </li>
+        </ol>
+      </aside>
+    </div>
+  </section>
+
+  <footer class="border-t border-line/70">
+    <div class="max-w-6xl mx-auto px-6 py-6 flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
+      <span>LangGraph multi-agent orchestration — Supervisor–Workers</span>
+      <span id="health" class="font-mono">api: checking…</span>
+    </div>
+  </footer>
+
+  <script>
+    const form = document.getElementById("brief-form");
+    const err = document.getElementById("form-error");
+    const btn = document.getElementById("submit-btn");
+    const spin = document.getElementById("btn-spin");
+    const label = document.getElementById("btn-label");
+
+    fetch("/health/ready").then(r => {
+      document.getElementById("health").textContent =
+        r.ok ? "api: ready" : "api: degraded";
+    }).catch(() => {
+      document.getElementById("health").textContent = "api: unreachable";
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      err.classList.add("hidden");
+      btn.disabled = true; spin.classList.remove("hidden");
+      label.textContent = "Submitting…";
+      const body = {
+        topic: form.topic.value.trim(),
+        audience: form.audience.value.trim() || "general business",
+        tone: form.tone.value,
+        report_type: form.report_type.value,
+        tenant_context: form.tenant_context.value.trim(),
+        requirements: form.requirements.value.split("\n").map(s => s.trim()).filter(Boolean),
+      };
+      const budget = parseFloat(form.budget_usd.value);
+      if (!Number.isNaN(budget)) body.budget_usd = budget;
+      try {
+        const res = await fetch("/api/v1/orchestration/reports", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        const job = await res.json();
+        window.location.href = `/console/?job=${encodeURIComponent(job.job_id)}`;
+      } catch (ex) {
+        err.textContent = `Submission failed: ${ex.message}`;
+        err.classList.remove("hidden");
+        btn.disabled = false; spin.classList.add("hidden");
+        label.textContent = "Generate report";
+      }
+    });
+  </script>
+</body>
+</html>

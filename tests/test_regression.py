@@ -75,7 +75,12 @@ async def test_sqlite_checkpointer_round_trip(tmp_path: Any) -> None:
     llm.register(
         "ReviewOutput",
         lambda s, c: ReviewOutput(
-            verdict="approve", score=4.2, rubric={"clarity": 4.2}
+            verdict="approve",
+            score=4.2,
+            rubric={
+                "structure": 4.2, "clarity": 4.2, "grounding": 4.2, "tone": 4.2
+            },
+            feedback=[],
         ),
     )
     async with sqlite_checkpointer(db) as saver:

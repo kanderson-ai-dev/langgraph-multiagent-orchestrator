@@ -32,13 +32,23 @@ from app.services.llm_client import StructuredLLM
 _SUPPORT_THRESHOLD = 0.90  # matches the EDD gate in the project objective
 
 
+class Rubric(BaseModel):
+    """Fixed-shape rubric — free-form ``dict`` fields are not valid in
+    OpenAI strict structured outputs (``additionalProperties`` is banned)."""
+
+    structure: float = Field(ge=1.0, le=5.0)
+    clarity: float = Field(ge=1.0, le=5.0)
+    grounding: float = Field(ge=1.0, le=5.0)
+    tone: float = Field(ge=1.0, le=5.0)
+
+
 class ReviewOutput(BaseModel):
-    """LLM-produced audit of the current draft."""
+    """LLM-produced audit of the current draft (strict-output safe)."""
 
     verdict: str = Field(description="approve | revise")
     score: float = Field(ge=1.0, le=5.0)
-    rubric: dict[str, float] = Field(default_factory=dict)
-    feedback: list[str] = Field(default_factory=list)
+    rubric: Rubric
+    feedback: list[str]
 
 
 def verify_citations(
@@ -136,7 +146,7 @@ class ReviewerWorker:
             draft_version=draft.version,
             verdict=verdict_str,
             score=min(max(out.score, 1.0), 5.0),
-            rubric=out.rubric,
+            rubric=out.rubric.model_dump(),
             feedback=feedback,
             unsupported_citations=dropped,
         )

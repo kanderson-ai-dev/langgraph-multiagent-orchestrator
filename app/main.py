@@ -1,10 +1,16 @@
 """FastAPI application entrypoint: lifespan, middleware, routers, metrics."""
 
+import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from app.api.v1.routes.auth import router as auth_router
 from app.api.v1.routes.dashboard import router as dashboard_router
@@ -31,18 +37,16 @@ _SECURITY_HEADERS = {
 }
 
 
-def build_runner(settings: Settings) -> JobRunner:
+def build_runner(
+    settings: Settings, checkpointer: BaseCheckpointSaver[Any] | None = None
+) -> JobRunner:
     """Construct the runner with a live (checkpointer-backed) graph."""
-    from langgraph.checkpoint.memory import MemorySaver
-
     llm = build_llm(settings)
     search = build_search_client(settings)
     scraper = ScraperClient(settings)
-    # In-memory checkpointer for the default runner; production deployments
-    # swap in ``sqlite_checkpointer`` via lifespan wiring.
     graph = build_graph(
         settings, llm=llm, search=search, scraper=scraper,
-        checkpointer=MemorySaver(),
+        checkpointer=checkpointer,
     )
     return JobRunner(
         graph, JobStore(settings.database_path),
@@ -50,26 +54,53 @@ def build_runner(settings: Settings) -> JobRunner:
     )
 
 
+def configure_tracing(settings: Settings) -> bool:
+    """Bridge LangSmith settings into ``os.environ`` for LangChain tracers.
+
+    ``pydantic-settings`` reads ``.env`` into the ``Settings`` object only —
+    LangChain's tracer reads the *process* environment, so the vars must be
+    exported before the graph/LLM clients run. Real env vars win (setdefault).
+    """
+    if not (settings.langchain_tracing_v2 and settings.langchain_api_key):
+        return False
+    os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+    os.environ.setdefault("LANGCHAIN_ENDPOINT", settings.langchain_endpoint)
+    os.environ.setdefault("LANGCHAIN_PROJECT", settings.langchain_project)
+    os.environ.setdefault(
+        "LANGCHAIN_API_KEY", settings.langchain_api_key.get_secret_value()
+    )
+    return True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings)
+    tracing = configure_tracing(settings)
     # Tests may pre-populate app.state.runner/job_store/usage_store via
     # dependency overrides before the lifespan runs.
-    if not hasattr(app.state, "runner"):
-        app.state.runner = build_runner(settings)
-        app.state.job_store = app.state.runner.job_store
-        app.state.usage_store = app.state.runner.usage_store
-    logger.info(
-        "app_startup",
-        app=settings.app_name,
-        version=settings.app_version,
-        environment=settings.environment,
-        auth_enabled=settings.auth_enabled,
-        search_provider=settings.effective_search_provider,
-        llm_configured=settings.openai_api_key is not None,
-    )
-    yield
+    async with AsyncExitStack() as stack:
+        if not hasattr(app.state, "runner"):
+            # Durable checkpointer: HITL resume survives process restarts.
+            from app.services.checkpointer import sqlite_checkpointer
+
+            saver = await stack.enter_async_context(
+                sqlite_checkpointer(settings.checkpoint_db_path)
+            )
+            app.state.runner = build_runner(settings, checkpointer=saver)
+            app.state.job_store = app.state.runner.job_store
+            app.state.usage_store = app.state.runner.usage_store
+        logger.info(
+            "app_startup",
+            app=settings.app_name,
+            version=settings.app_version,
+            environment=settings.environment,
+            auth_enabled=settings.auth_enabled,
+            search_provider=settings.effective_search_provider,
+            llm_configured=settings.openai_api_key is not None,
+            langsmith_tracing=tracing,
+        )
+        yield
     logger.info("app_shutdown")
 
 
@@ -98,6 +129,20 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(orchestration_router, prefix=settings.api_prefix)
     app.include_router(dashboard_router, prefix=settings.api_prefix)
+
+    # Frontend: public landing at `/`, operator console at `/console`.
+    frontend = Path(__file__).resolve().parent.parent / "frontend"
+    if frontend.is_dir():
+        @app.get("/", include_in_schema=False)
+        async def landing() -> FileResponse:
+            return FileResponse(frontend / "index.html")
+
+        app.mount(
+            "/console",
+            StaticFiles(directory=frontend / "console", html=True),
+            name="console",
+        )
+
     instrument_app(app)
     return app
 

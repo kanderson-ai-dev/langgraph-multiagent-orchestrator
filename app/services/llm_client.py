@@ -41,6 +41,9 @@ class OpenAIStructuredLLM:
         self._model = ChatOpenAI(
             model=settings.chat_model_name,
             api_key=settings.openai_api_key,
+            # Transient 429/5xx retry with exponential backoff — parallel jobs
+            # can briefly saturate the org TPM limit mid-run.
+            max_retries=6,
         )
 
     async def structured(

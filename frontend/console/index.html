@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Console — Orchestrator</title>
+  <link rel="stylesheet" href="styles.css?v=2" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">S/W</div>
+      <span class="brand-name">orchestrator</span>
+      <span class="chip chip-dim">console</span>
+    </div>
+    <div class="topbar-right">
+      <span id="ws-badge" class="chip chip-mono" title="Tenant workspace">ws: default</span>
+      <span id="health-dot" class="dot" title="API health"></span>
+      <a href="/" class="link">← landing</a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <section class="card">
+        <h2 class="card-title">New brief</h2>
+        <form id="job-form">
+          <label class="field">
+            <span>Topic</span>
+            <input name="topic" required minlength="3" placeholder="Research topic…" />
+          </label>
+          <div class="field-row">
+            <label class="field">
+              <span>Audience</span>
+              <input name="audience" value="general business" />
+            </label>
+            <label class="field">
+              <span>Tone</span>
+              <select name="tone">
+                <option value="analytical" selected>Analytical</option>
+                <option value="persuasive">Persuasive</option>
+                <option value="executive">Executive</option>
+                <option value="technical">Technical</option>
+              </select>
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field">
+              <span>Report type</span>
+              <select name="report_type">
+                <option value="general" selected>General</option>
+                <option value="market_intelligence">Market intelligence</option>
+                <option value="vendor_assessment">Vendor assessment</option>
+                <option value="competitive_landscape">Competitive landscape</option>
+                <option value="technical_due_diligence">Technical due diligence</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Budget $ <em>(cap)</em></span>
+              <input name="budget_usd" type="number" min="0" step="any" placeholder="∞" />
+            </label>
+          </div>
+          <label class="field">
+            <span>Client context <em>(optional)</em></span>
+            <input name="tenant_context" placeholder="e.g. Series B fintech evaluating KYC vendors" />
+          </label>
+          <label class="field">
+            <span>Requirements <em>(one per line)</em></span>
+            <textarea name="requirements" rows="2"></textarea>
+          </label>
+          <button type="submit" class="btn btn-primary btn-block" id="submit-btn">Run orchestration</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2 class="card-title">Recent jobs</h2>
+        <ul id="jobs-list" class="jobs-list"></ul>
+        <p id="jobs-empty" class="jobs-empty">No jobs yet — run a brief.</p>
+      </section>
+
+      <section class="card">
+        <h2 class="card-title">Workspace</h2>
+        <div class="stats" id="dash-stats">
+          <div class="stat"><span class="stat-label">Total cost</span><span class="stat-value" id="st-cost">—</span></div>
+          <div class="stat"><span class="stat-label">LLM calls</span><span class="stat-value" id="st-calls">—</span></div>
+          <div class="stat"><span class="stat-label">Avg latency</span><span class="stat-value" id="st-lat">—</span></div>
+          <div class="stat"><span class="stat-label">Tokens (in/out)</span><span class="stat-value" id="st-tok">—</span></div>
+        </div>
+        <div id="role-costs" class="role-costs"></div>
+      </section>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <div id="empty" class="empty">
+        <p class="empty-title">No job selected</p>
+        <p class="empty-sub">Submit a brief on the left, or open <code>?job=&lt;id&gt;</code>.</p>
+      </div>
+
+      <section id="job-view" class="hidden">
+        <div class="job-head card">
+          <div>
+            <p class="job-id font-mono" id="job-id"></p>
+            <p class="job-topic" id="job-topic"></p>
+            <p class="job-meta" id="job-meta"></p>
+            <div class="job-team" id="job-team"></div>
+          </div>
+          <div class="job-head-right">
+            <button id="review-btn" class="btn btn-primary hidden">Review required</button>
+            <span id="job-status" class="status"></span>
+            <span id="job-cost" class="chip chip-mono"></span>
+            <a id="pdf-link" class="btn btn-ghost hidden" href="#" target="_blank" rel="noopener">PDF ↓</a>
+          </div>
+        </div>
+
+        <div class="columns">
+          <section class="card feed-card">
+            <h2 class="card-title">Live transcript</h2>
+            <ol id="feed" class="feed"></ol>
+          </section>
+
+          <section class="card report-card hidden" id="report-card">
+            <div class="report-head">
+              <h2 class="card-title">Final report</h2>
+              <a id="report-pdf" class="btn btn-primary hidden" href="#" target="_blank" rel="noopener">Download PDF ↓</a>
+            </div>
+            <div id="audit-badge" class="chip chip-mono hidden"></div>
+            <article id="report" class="report"></article>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- HITL modal -->
+  <div id="hitl-modal" class="modal-backdrop hidden">
+    <div class="modal card">
+      <h2 class="modal-title">Human review required</h2>
+      <p class="modal-sub" id="hitl-reason">The debate budget was exhausted without an approved draft.</p>
+      <p id="hitl-error" class="modal-error hidden"></p>
+      <div id="hitl-verdict" class="hitl-verdict"></div>
+      <label class="field">
+        <span>Feedback <em>(required for “edit”)</em></span>
+        <textarea id="hitl-feedback" rows="3" placeholder="What should the Writer change?"></textarea>
+      </label>
+      <label class="field" id="hitl-fund-field">
+        <span>Additional budget $ <em>(for “fund”)</em></span>
+        <input id="hitl-fund" type="number" min="0" step="any" placeholder="0.10" />
+      </label>
+      <div class="modal-actions">
+        <button class="btn btn-ghost modal-dismiss" id="hitl-dismiss">Decide later</button>
+        <button class="btn btn-danger" data-action="reject">Reject</button>
+        <button class="btn btn-ghost" data-action="fund">Fund &amp; continue</button>
+        <button class="btn btn-ghost" data-action="edit">Request edits</button>
+        <button class="btn btn-primary" data-action="approve">Approve report</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js?v=2"></script>
+</body>
+</html>

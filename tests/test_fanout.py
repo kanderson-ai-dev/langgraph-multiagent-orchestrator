@@ -55,7 +55,10 @@ def _llm() -> StubLLM:
     stub.register(
         "ReviewOutput",
         lambda s, c: ReviewOutput(
-            verdict="approve", score=4.0, rubric={"x": 4.0}
+            verdict="approve",
+            score=4.0,
+            rubric={"structure": 4.0, "clarity": 4.0, "grounding": 4.0, "tone": 4.0},
+            feedback=[],
         ),
     )
     return stub
@@ -129,7 +132,12 @@ async def test_termination_with_fanout_worst_case() -> None:
     stub = _llm()
     stub.register(
         "ReviewOutput",
-        lambda s, c: ReviewOutput(verdict="revise", score=3.0, rubric={}),
+        lambda s, c: ReviewOutput(
+            verdict="revise",
+            score=3.0,
+            rubric={"structure": 3.0, "clarity": 3.0, "grounding": 3.0, "tone": 3.0},
+            feedback=[],
+        ),
     )
     g = build_graph(
         settings, llm=stub,
