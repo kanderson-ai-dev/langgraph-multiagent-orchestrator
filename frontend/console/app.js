@@ -228,6 +228,19 @@ async function attachJob(jobId) {
   if (job.result?.report) renderReport(job.result);
   if (job.status === "awaiting_review") openHitl(job.result?.escalation_reason);
 
+  // Reattach history: a finished job carries its transcript in the
+  // persisted result — replay it so the feed shows the full debate even
+  // though the SSE stream is no longer open (e.g. reopened from the list).
+  for (const msg of job.result?.transcript || []) {
+    const tag = ["verdict", "escalation"].includes(msg.kind)
+      ? `<span class="kind">${escapeHtml(msg.kind)}</span>` : "";
+    feedEntry(
+      msg.sender || "system",
+      `${tag}${escapeHtml(msg.content || "")}`,
+      msg.kind === "verdict" ? "verdict" : msg.kind === "escalation" ? "escalation" : ""
+    );
+  }
+
   if (!["done", "failed", "blocked"].includes(job.status)) {
     eventSource = new EventSource(`${API}/orchestration/reports/${jobId}/stream`);
     eventSource.onmessage = (e) => handleEvent(JSON.parse(e.data));
