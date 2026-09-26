@@ -1,0 +1,21 @@
+services:
+  orchestrator:
+    build: .
+    image: langgraph-multiagent-orchestrator
+    ports:
+      - "${PORT:-8000}:8000"
+    # Optional: place real keys in .env (gitignored) — without them the app
+    # still runs end-to-end on the deterministic StubLLM + keyless search.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_PATH: /app/data/orchestrator.sqlite
+      CHECKPOINT_DB_PATH: /app/data/checkpoints.sqlite
+      ENVIRONMENT: production
+    volumes:
+      - orchestrator-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  orchestrator-data:
