@@ -140,6 +140,7 @@ metrics that matter in this domain.
 | Safety | Adversarial briefs blocked | 1.00 | **1.000** ✅ |
 | Latency | Full job wall-clock, live path | p50 ≤ 90s / p95 ≤ 240s | **~105s to HITL/done observed** (was 150–670s before parallel search+scrape) — converged runs land near the p50 target; see Known limitations |
 | Cost | Per job (all roles, all rounds) | ≤ $0.08 | **$0.010–$0.104 observed** ✅ (upper end = full 3-round debate + fund) |
+| UI end-to-end | Browser E2E: real console → submit → SSE transcript → rendered report → clickable sources | runs in CI (Playwright) | **PASS** ✅ |
 | Test coverage | `pytest --cov=app` | ≥ 80% | **90%** ✅ |
 | Static typing | `mypy --strict app/` | 0 errors | **0 errors** ✅ |
 
