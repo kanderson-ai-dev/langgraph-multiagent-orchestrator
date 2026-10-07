@@ -363,19 +363,6 @@ If you need agent teams that assemble per task, debate under budget, and
 deliver auditable artifacts — I can adapt this exact framework
 (`app/framework/` is domain-agnostic by design) to your domain.
 
-This is the fourth and final rung of a four-project Agentic AI portfolio
-ladder:
-
-1. `agentic-api` — deterministic single-agent service (guardrails, tool use,
-   streaming).
-2. `agentic-rag-system` — self-correcting RAG loop (grade → rewrite →
-   escalate).
-3. `agentic-web-researcher` — hybrid multi-agent: a planner dispatches
-   parallel workers, a critic re-plans, a writer synthesizes.
-4. **`langgraph-multiagent-orchestrator` (this project)** — a reusable,
-   multi-tenant Supervisor–Workers framework: dynamic teams, runtime `Send()`
-   fan-out, bounded debate, cost governance, sealed audit trails.
-
 ## 📄 License
 
 [MIT](LICENSE)
