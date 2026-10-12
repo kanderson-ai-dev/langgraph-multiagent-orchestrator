@@ -23,6 +23,7 @@ data/
 
 # Internal planning/reference docs — never reach the public repo
 PLAN.md
+PLAN_upgrade.md
 AGENTS.md
 README-agentic-*.md
 

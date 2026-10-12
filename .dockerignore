@@ -20,6 +20,7 @@ data/
 *.sqlite
 *.sqlite3
 PLAN.md
+PLAN_upgrade.md
 AGENTS.md
 README-agentic-*.md
 .idea/
