@@ -105,6 +105,42 @@ class JobStore:
             row = await cursor.fetchone()
         return _row_to_record(row) if row else None
 
+    async def list_stale_awaiting_review(
+        self, before: datetime
+    ) -> list[JobRecord]:
+        """All ``awaiting_review`` jobs (every workspace) idle since ``before``.
+
+        Cross-workspace by design — only the background HITL sweeper calls
+        this; it never flows back to a tenant-scoped request.
+        """
+        async with self._conn() as db:
+            cursor = await db.execute(
+                "SELECT * FROM jobs WHERE status = 'awaiting_review'"
+                " AND updated_at < ? ORDER BY updated_at",
+                (before.isoformat(),),
+            )
+            rows = await cursor.fetchall()
+        return [_row_to_record(r) for r in rows]
+
+    async def mark_expired(
+        self, workspace_id: str, job_id: str, *, reason: str
+    ) -> JobRecord | None:
+        """Terminal ``expired`` transition — merges the reason into result."""
+        record = await self.get(workspace_id, job_id)
+        if record is None or record.status != "awaiting_review":
+            return None
+        result = dict(record.result or {})
+        result.update(
+            {
+                "expired": True,
+                "expired_reason": reason,
+                "escalation_reason": result.get("escalation_reason"),
+            }
+        )
+        return await self.set_result(
+            workspace_id, job_id, result, cost_usd=record.cost_usd, status="expired"
+        )
+
     async def list(self, workspace_id: str, *, limit: int = 50) -> list[JobRecord]:
         async with self._conn() as db:
             cursor = await db.execute(

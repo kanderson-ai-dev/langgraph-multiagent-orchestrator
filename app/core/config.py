@@ -59,6 +59,10 @@ class Settings(BaseSettings):
 
     # Orchestration bounds
     max_debate_rounds: int = Field(default=3, ge=0, le=10)
+    # HITL: a job paused in awaiting_review for longer than this is swept
+    # to `expired` by the background sweeper. 0 disables expiry.
+    hitl_expiry_hours: float = Field(default=72.0, ge=0.0)
+    hitl_sweep_interval_seconds: float = Field(default=300.0, gt=0.0)
     max_sub_questions: int = Field(default=5, ge=1, le=10)
     # Per-worker dispatch cap in free routing: once a worker has been
     # dispatched this many times it leaves the Supervisor's catalog, so a

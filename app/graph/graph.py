@@ -300,9 +300,13 @@ def build_graph(
         if target == "human_review":
             # Persist the escalation *before* the interrupt so the checkpoint
             # already reflects awaiting_review when the graph pauses.
+            from app.graph.hitl import allowed_actions
+
             update["status"] = "awaiting_review"
-            update["escalation_reason"] = (
-                "budget" if reason == "budget_exceeded" else "debate_rounds"
+            esc_reason = "budget" if reason == "budget_exceeded" else "debate_rounds"
+            update["escalation_reason"] = esc_reason
+            update["allowed_actions"] = allowed_actions(
+                esc_reason, has_draft=bool(state.get("drafts"))
             )
             if reason == "budget_exceeded":
                 content = (
@@ -328,19 +332,27 @@ def build_graph(
         """Pause for human review via LangGraph ``interrupt()``.
 
         First entry escalates (status awaiting_review). Resumed with
-        ``Command(resume={"action": "approve"|"edit"|"reject", ...})``:
+        ``Command(resume={"action": "approve"|"edit"|"reject"|"fund", ...})``:
         approve → assemble the report; edit → route back to writer with the
-        human's feedback appended; reject → terminal rejection.
+        human's feedback appended; reject → terminal rejection with the
+        operator's reason recorded; fund/fund_and_continue → raise the
+        budget and hand control back to the Supervisor.
         """
         from langgraph.types import interrupt
 
+        from app.graph.hitl import allowed_actions
+
         verdict = state.get("latest_verdict")
+        reason = state.get("escalation_reason") or "debate_rounds"
+        has_draft = bool(state.get("drafts"))
         decision = interrupt(
             {
-                "reason": state.get("escalation_reason") or "debate_rounds",
+                "reason": reason,
                 "debate_round": state.get("debate_round", 0),
                 "latest_verdict": verdict.model_dump() if verdict else None,
-                "actions": ["approve", "edit", "reject", "fund"],
+                "has_draft": has_draft,
+                "allowed_actions": state.get("allowed_actions")
+                or allowed_actions(reason, has_draft),
             }
         )
         from app.core.metrics import HUMAN_REVIEW_TOTAL
@@ -352,7 +364,7 @@ def build_graph(
             kind="system", content=f"Human decision: {action}",
             round=state.get("debate_round", 0),
         )
-        if action == "fund":
+        if action in ("fund", "fund_and_continue"):
             # Top up the LLM budget and hand control back to the Supervisor.
             extra = float(decision.get("additional_budget_usd", 0.0))
             budget = (state.get("budget_usd") or 0.0) + max(extra, 0.0)
@@ -385,11 +397,25 @@ def build_graph(
                 "status": "running",
                 "transcript": [resume],
             }
+        # Reject: capture the operator's reason — it lands in the
+        # hash-chained transcript (audit) and the persisted job result.
+        reject_reason = (
+            str(decision.get("feedback", "")).strip()
+            if isinstance(decision, dict)
+            else ""
+        ) or "no reason given"
         return {
             "next_worker": "rejection_output",
             "status": "failed",
-            "transcript": [resume],
-            "errors": ["rejected by human reviewer"],
+            "rejection_reason": reject_reason,
+            "transcript": [
+                resume.model_copy(
+                    update={
+                        "content": f"Human decision: reject — {reject_reason}"
+                    }
+                )
+            ],
+            "errors": [f"rejected by human reviewer: {reject_reason}"],
         }
 
     async def report_assembler_node(state: OrchestrationState) -> dict[str, Any]:

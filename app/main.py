@@ -109,6 +109,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         registry = getattr(app.state, "prompt_registry", None)
         if registry is not None:
             registry.publish_metrics()
+        # HITL expiry sweeper: deterministic interval loop; sweep logic
+        # itself lives in JobRunner.expire_stale (injectable clock).
+        import asyncio
+        import contextlib
+
+        async def _expiry_loop() -> None:
+            while True:
+                await asyncio.sleep(settings.hitl_sweep_interval_seconds)
+                try:
+                    await app.state.runner.expire_stale()
+                except Exception:
+                    logger.exception("hitl_sweep_failed")
+
+        sweeper = asyncio.create_task(_expiry_loop())
         logger.info(
             "app_startup",
             app=settings.app_name,
@@ -121,6 +135,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             tracing_provider=tracing_provider,
         )
         yield
+        sweeper.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sweeper
     shutdown_tracing()
     logger.info("app_shutdown")
 

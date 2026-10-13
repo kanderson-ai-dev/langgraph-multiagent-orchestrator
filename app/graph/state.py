@@ -10,7 +10,8 @@ from typing import Annotated, Any, Literal, TypedDict, TypeVar
 from pydantic import BaseModel, Field
 
 JobStatus = Literal[
-    "queued", "running", "awaiting_review", "done", "failed", "blocked"
+    "queued", "running", "awaiting_review", "done", "failed", "blocked",
+    "expired",
 ]
 Verdict = Literal["approve", "revise"]
 
@@ -156,6 +157,10 @@ class OrchestrationState(TypedDict, total=False):
     cost_so_far: Annotated[float, keep_max]
     budget_usd: float | None  # hard LLM-spend cap; None = unlimited
     escalation_reason: str | None  # "debate_rounds" | "budget"
+    # HITL: actions legal for this pause (per hitl.allowed_actions) and the
+    # operator's stated reason when a job is rejected.
+    allowed_actions: list[str]
+    rejection_reason: str | None
     audit_root: str | None
     # Evidence sealing (Phase 6): manifest over gathered sources, sealed
     # into the audit chain before the writer runs.

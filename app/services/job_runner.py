@@ -9,6 +9,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -20,7 +21,7 @@ from app.core.cost_tracking import UsageTracker, bind_tracker
 from app.core.logging import get_logger
 from app.graph.graph import initial_state
 from app.graph.state import Brief
-from app.services.job_store import JobStore
+from app.services.job_store import JobRecord, JobStore
 from app.services.prompt_registry import PromptRegistry
 from app.services.tracing import bind_trace
 from app.services.usage_store import UsageStore
@@ -104,9 +105,58 @@ class JobRunner:
     async def resume(
         self, job_id: str, workspace_id: str, decision: dict[str, Any]
     ) -> None:
-        """Resume a job paused at ``human_review`` with the human's decision."""
+        """Resume a job paused at ``human_review`` with the human's decision.
+
+        The status flip to ``running`` happens synchronously, before the
+        task launches, so a second review POST hitting the API sees a
+        non-awaiting status and gets a 409 — no double resume.
+        """
+        await self._jobs.update_status(workspace_id, job_id, "running")
         task = asyncio.create_task(self._resume(job_id, workspace_id, decision))
         self._tasks[job_id] = task
+
+    async def expire_stale(self, *, now: datetime | None = None) -> list[JobRecord]:
+        """Sweep ``awaiting_review`` jobs idle past ``HITL_EXPIRY_HOURS``.
+
+        ``now`` is injectable so the sweep is deterministic under test.
+        Expired is a terminal, *auditable* state — the record keeps its
+        partial result, escalation reason and cost; nothing is silently
+        failed or deleted.
+        """
+        hours = self._settings.hitl_expiry_hours
+        if hours <= 0:
+            return []
+        moment = now or datetime.now(UTC)
+        cutoff = moment - timedelta(hours=hours)
+        stale = await self._jobs.list_stale_awaiting_review(cutoff)
+        expired: list[JobRecord] = []
+        for job in stale:
+            reason = (
+                f"awaiting_review exceeded {hours:g}h without a human "
+                "decision — expired"
+            )
+            rec = await self._jobs.mark_expired(
+                job.workspace_id, job.job_id, reason=reason
+            )
+            if rec is None:
+                continue
+            expired.append(rec)
+            self._emit(
+                job.job_id,
+                {
+                    "node": "hitl_sweep",
+                    "status": "expired",
+                    "reason": reason,
+                    "terminal": True,
+                    "cost_usd": rec.cost_usd,
+                },
+            )
+            logger.info(
+                "hitl_expired",
+                job_id=job.job_id, workspace_id=job.workspace_id,
+                idle_hours=hours,
+            )
+        return expired
 
     def _config(self, job_id: str) -> RunnableConfig:
         return {"configurable": {"thread_id": job_id}}
@@ -269,12 +319,15 @@ class JobRunner:
                 status="done",
             )
         elif status == "awaiting_review":
-            # Persist why it escalated — the console/poll shows the real cause.
+            # Persist why it escalated — the console/poll shows the real
+            # cause plus the legal actions for this pause.
             await self._jobs.set_result(
                 workspace_id,
                 job_id,
                 {
                     "escalation_reason": values.get("escalation_reason"),
+                    "allowed_actions": values.get("allowed_actions"),
+                    "has_draft": bool(values.get("drafts")),
                     "debate_round": values.get("debate_round", 0),
                     "max_debate_rounds": values.get("max_debate_rounds"),
                     "prompt_versions": values.get("prompt_versions", {}),
@@ -285,10 +338,39 @@ class JobRunner:
                 status="awaiting_review",
             )
         else:
-            await self._jobs.update_status(workspace_id, job_id, status)  # type: ignore[arg-type]
+            # Terminal non-success (failed / blocked): still persist the
+            # transcript + audit chain + rejection reason — a rejected job
+            # must stay explainable, never silently `failed`.
+            transcript = list(values.get("transcript", []))
+            from app.services.audit import audit_root as root_of
+            from app.services.audit import chain_transcript
+
+            await self._jobs.set_result(
+                workspace_id,
+                job_id,
+                {
+                    "report": None,
+                    "rejection_reason": values.get("rejection_reason"),
+                    "errors": [str(e) for e in values.get("errors", [])],
+                    # The report assembler never ran, so seal the chain tip
+                    # here — the audit endpoint can still verify.
+                    "audit_root": values.get("audit_root")
+                    or root_of(transcript),
+                    "audit_entries": [
+                        e.model_dump() for e in chain_transcript(transcript)
+                    ],
+                    "transcript": [
+                        m.model_dump(mode="json") for m in transcript
+                    ],
+                    "debate_rounds": values.get("debate_round", 0),
+                    "prompt_versions": values.get("prompt_versions", {}),
+                },
+                cost_usd=cost,
+                status=status,  # type: ignore[arg-type]
+            )
         # Awaiting review is a pause, not a terminal state — keep the SSE
         # stream open so subscribers see events after the resume.
-        terminal = status in ("done", "failed", "blocked")
+        terminal = status in ("done", "failed", "blocked", "expired")
         self._emit(
             job_id,
             {"node": "runner", "status": status,

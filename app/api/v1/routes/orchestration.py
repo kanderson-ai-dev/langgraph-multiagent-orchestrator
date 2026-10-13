@@ -161,14 +161,42 @@ async def review(
     request: Request,
     ctx: RequestContext = Depends(get_context),
 ) -> dict[str, str]:
+    from app.graph.hitl import ALL_ACTIONS, approve_hint
+
     job = await _jobs(request).get(ctx.workspace_id, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     if job.status != "awaiting_review":
         raise HTTPException(status_code=409, detail=f"job is {job.status}, not awaiting_review")
-    if body.action not in ("approve", "edit", "reject", "fund"):
+    if body.action not in ALL_ACTIONS:
         raise HTTPException(
-            status_code=422, detail="action must be approve|edit|reject|fund"
+            status_code=422,
+            detail=f"action must be one of {'|'.join(ALL_ACTIONS)}",
+        )
+    result = job.result or {}
+    allowed = result.get("allowed_actions")
+    if isinstance(allowed, list) and body.action not in allowed:
+        if body.action == "approve" and not result.get("has_draft"):
+            raise HTTPException(
+                status_code=422,
+                detail=approve_hint(
+                    str(result.get("escalation_reason") or "")
+                ),
+            )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"action '{body.action}' is not allowed for this escalation "
+                f"({result.get('escalation_reason') or 'unknown'}); allowed: "
+                f"{', '.join(str(a) for a in allowed)}"
+            ),
+        )
+    if body.action in ("fund", "fund_and_continue") and (
+        body.additional_budget_usd <= 0.0
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="additional_budget_usd must be > 0 to fund the job",
         )
     await _runner(request).resume(
         job_id,
