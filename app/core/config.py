@@ -136,6 +136,11 @@ class Settings(BaseSettings):
     # score-type metrics during promotion gating (safety metrics use 0.0).
     prompt_promotion_epsilon: float = Field(default=0.05, ge=0.0)
 
+    # White-label UI (served publicly via GET /api/v1/config/ui)
+    ui_product_name: str = "Orchestrator"
+    ui_accent_color: str = Field(default="#4f7cff", pattern=r"^#[0-9a-fA-F]{6}$")
+    ui_logo_url: str | None = None
+
     @field_validator(
         "openai_api_key",
         "search_api_key",

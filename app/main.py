@@ -1,6 +1,7 @@
 """FastAPI application entrypoint: lifespan, middleware, routers, metrics."""
 
 import os
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -14,15 +15,19 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from app.api.v1.routes.auth import router as auth_router
 from app.api.v1.routes.dashboard import router as dashboard_router
+from app.api.v1.routes.feedback import router as feedback_router
 from app.api.v1.routes.health import router as health_router
 from app.api.v1.routes.orchestration import router as orchestration_router
 from app.api.v1.routes.prompts import router as prompts_router
+from app.api.v1.routes.status import config_router
+from app.api.v1.routes.status import router as status_router
 from app.api.v1.routes.workspaces import router as workspaces_router
 from app.core.config import Settings, get_settings
 from app.core.event_bus import build_event_bus
 from app.core.logging import configure_logging, get_logger
 from app.core.metrics import instrument_app
 from app.graph.graph import build_graph
+from app.services.feedback_store import FeedbackStore
 from app.services.job_runner import JobRunner
 from app.services.job_store import JobStore
 from app.services.llm_client import build_llm
@@ -117,6 +122,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.prompt_registry = app.state.runner.prompt_registry
         if not hasattr(app.state, "workspace_store"):
             app.state.workspace_store = WorkspaceStore(settings.database_path)
+        if not hasattr(app.state, "feedback_store"):
+            app.state.feedback_store = FeedbackStore(settings.database_path)
+        app.state.started_at = time.monotonic()
         # Idempotent bootstrap: pre-RBAC implicit tenants land in the
         # ``default`` workspace with the platform admin as its admin member.
         await app.state.workspace_store.migrate(
@@ -183,12 +191,15 @@ def create_app() -> FastAPI:
             response.headers.setdefault(header, value)
         return response
 
+    app.include_router(status_router)
     app.include_router(health_router)
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(orchestration_router, prefix=settings.api_prefix)
     app.include_router(dashboard_router, prefix=settings.api_prefix)
     app.include_router(prompts_router, prefix=settings.api_prefix)
     app.include_router(workspaces_router, prefix=settings.api_prefix)
+    app.include_router(feedback_router, prefix=settings.api_prefix)
+    app.include_router(config_router, prefix=settings.api_prefix)
 
     # Frontend: public landing at `/`, operator console at `/console`.
     frontend = Path(__file__).resolve().parent.parent / "frontend"

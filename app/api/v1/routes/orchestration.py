@@ -219,25 +219,75 @@ async def report_pdf(
     job = await _jobs(request).get(ctx.workspace_id, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
-    if not job.result or not job.result.get("report"):
-        raise HTTPException(status_code=409, detail="report not ready")
 
     from app.services.pdf_export import markdown_to_pdf
 
-    report_md = str(job.result["report"])
-    raw_versions = job.result.get("prompt_versions")
-    prompt_versions = raw_versions if isinstance(raw_versions, dict) else {}
-    footer = ""
-    if prompt_versions:
-        rendered = " · ".join(
-            f"{name} v{ver}" for name, ver in sorted(prompt_versions.items())
-        )
-        footer = f"Prompt versions: {rendered}"
-    pdf = markdown_to_pdf(report_md, title=job.brief.topic, footer=footer)
+    pdf = markdown_to_pdf(
+        _report_md(job), title=job.brief.topic, footer=_report_footer(job)
+    )
     return Response(
         content=pdf,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="report-{job_id}.pdf"'},
+    )
+
+
+def _report_md(job: Any) -> str:
+    if not job.result or not job.result.get("report"):
+        raise HTTPException(status_code=409, detail="report not ready")
+    return str(job.result["report"])
+
+
+def _report_footer(job: Any) -> str:
+    raw = job.result.get("prompt_versions")
+    if not isinstance(raw, dict) or not raw:
+        return ""
+    rendered = " · ".join(f"{n} v{v}" for n, v in sorted(raw.items()))
+    return f"Prompt versions: {rendered}"
+
+
+@router.get("/reports/{job_id}/report.md")
+async def report_md(
+    job_id: str,
+    request: Request,
+    ctx: RequestContext = Depends(require_role("viewer")),
+) -> Response:
+    job = await _jobs(request).get(ctx.workspace_id, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    md = _report_md(job)
+    return Response(
+        content=md,
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="report-{job_id}.md"'
+        },
+    )
+
+
+@router.get("/reports/{job_id}/report.docx")
+async def report_docx(
+    job_id: str,
+    request: Request,
+    ctx: RequestContext = Depends(require_role("viewer")),
+) -> Response:
+    job = await _jobs(request).get(ctx.workspace_id, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    from app.services.docx_export import markdown_to_docx
+
+    docx = markdown_to_docx(
+        _report_md(job), title=job.brief.topic, footer=_report_footer(job)
+    )
+    return Response(
+        content=docx,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument"
+            ".wordprocessingml.document"
+        ),
+        headers={
+            "Content-Disposition": f'attachment; filename="report-{job_id}.docx"'
+        },
     )
 
 

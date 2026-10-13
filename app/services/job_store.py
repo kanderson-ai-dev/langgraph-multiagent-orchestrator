@@ -164,6 +164,19 @@ class JobStore:
             rows = await cursor.fetchall()
         return {str(r["status"]): int(r["n"]) for r in rows}
 
+    async def status_counts_all(self) -> dict[str, int]:
+        """Jobs by status across all tenants — public /status only.
+
+        Aggregate counts carry no tenant-identifying payload, so they're
+        safe to expose on the public status page.
+        """
+        async with self._conn() as db:
+            cursor = await db.execute(
+                "SELECT status, COUNT(*) AS n FROM jobs GROUP BY status"
+            )
+            rows = await cursor.fetchall()
+        return {str(r["status"]): int(r["n"]) for r in rows}
+
     async def daily_stats(
         self, workspace_id: str, *, days: int = 14
     ) -> builtins.list[dict[str, object]]:

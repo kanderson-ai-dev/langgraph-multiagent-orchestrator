@@ -12,6 +12,8 @@ import { initReview } from "./js/views/review.js";
 import { initPromptsView, loadRegistry } from "./js/views/prompts.js";
 import { initPerformanceView, loadPerformance } from "./js/views/performance.js";
 import { initAuditView, loadJobOptions } from "./js/views/audit.js";
+import { initReportView } from "./js/views/report.js";
+import { applyBranding } from "./js/branding.js";
 
 /* ── tab bar ────────────────────────────────────────────────────────── */
 
@@ -46,6 +48,8 @@ initReview({ onResumed });
 initPromptsView();
 initPerformanceView();
 initAuditView();
+initReportView();
+applyBranding();
 
 fetch("/health/ready")
   .then((r) => $("#health-dot").classList.add(r.ok ? "ok" : "bad"))

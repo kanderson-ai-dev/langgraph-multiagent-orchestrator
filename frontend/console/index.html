@@ -131,12 +131,23 @@
             <section class="card report-card hidden" id="report-card">
               <div class="report-head">
                 <h2 class="card-title">Final report</h2>
-                <a id="report-pdf" class="btn btn-primary hidden" href="#" target="_blank" rel="noopener">Download PDF ↓</a>
+                <div class="report-downloads">
+                  <a id="report-pdf" class="btn btn-primary hidden" href="#" target="_blank" rel="noopener">PDF ↓</a>
+                  <a id="report-docx" class="btn btn-ghost hidden" href="#" target="_blank" rel="noopener">DOCX ↓</a>
+                  <a id="report-md" class="btn btn-ghost hidden" href="#" target="_blank" rel="noopener">MD ↓</a>
+                </div>
               </div>
               <div id="prompt-versions" class="chip-row hidden" aria-label="Prompt versions used"></div>
               <div id="evidence-strip" class="chip-row hidden" aria-label="Sealed evidence hashes"></div>
               <div id="audit-badge" class="chip chip-mono hidden"></div>
               <article id="report" class="report"></article>
+              <div id="feedback-bar" class="feedback-bar">
+                <span class="feedback-label">Was this report useful?</span>
+                <button type="button" class="btn btn-ghost fb-btn" data-rating="up" aria-label="Thumbs up">👍</button>
+                <button type="button" class="btn btn-ghost fb-btn" data-rating="down" aria-label="Thumbs down">👎</button>
+                <input id="fb-comment" type="text" placeholder="optional comment…" maxlength="2000" />
+                <span id="fb-status" class="fb-status" aria-live="polite"></span>
+              </div>
             </section>
           </div>
         </section>

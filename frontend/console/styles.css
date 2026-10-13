@@ -326,3 +326,19 @@ a.chip-evidence:hover { background: rgba(34, 197, 94, .08); }
   .perf-grid { grid-template-columns: 1fr; }
   .tab { padding: 10px 8px; font-size: 12.5px; }
 }
+
+/* report downloads + feedback widget (Phase 13) */
+.report-downloads { display: flex; gap: 8px; align-items: center; }
+.feedback-bar {
+  display: flex; align-items: center; gap: 10px; margin-top: 18px;
+  padding-top: 14px; border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.feedback-label { color: var(--muted); font-size: 13px; }
+.fb-btn.active { border-color: var(--accent); color: var(--accent); }
+#fb-comment {
+  flex: 1; min-width: 140px; background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 10px; color: var(--text); font-size: 13px;
+}
+.fb-status { font-size: 12px; color: var(--muted); }

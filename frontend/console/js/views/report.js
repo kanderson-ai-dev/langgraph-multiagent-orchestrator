@@ -2,8 +2,8 @@
  * badge and the sealed evidence manifest (per-source content hashes the
  * citation footnotes reference as `#<sha12>`). */
 
-import { api } from "../api.js";
-import { $, escapeHtml, md } from "../util.js";
+import { api, apiPost } from "../api.js";
+import { $, escapeHtml, md, toast } from "../util.js";
 import { state } from "../state.js";
 
 export async function renderReport(result) {
@@ -15,11 +15,20 @@ export async function renderReport(result) {
     /\n?-{3,}\s*\n_Audit root:[\s\S]*$/m, ""
   );
   $("#report").innerHTML = md(reportMd);
-  const pdfUrl = `/api/v1/orchestration/reports/${state.currentJob}/report.pdf`;
-  $("#pdf-link").href = pdfUrl;
+  const base = `/api/v1/orchestration/reports/${state.currentJob}`;
+  $("#pdf-link").href = `${base}/report.pdf`;
   $("#pdf-link").classList.remove("hidden");
-  $("#report-pdf").href = pdfUrl;
-  $("#report-pdf").classList.remove("hidden");
+  for (const ext of ["pdf", "docx", "md"]) {
+    const link = $(`#report-${ext}`);
+    link.href = `${base}/report.${ext}`;
+    link.classList.remove("hidden");
+  }
+  $("#fb-status").textContent = "";
+  $("#fb-comment").value = "";
+  document.querySelectorAll(".fb-btn").forEach((b) => {
+    b.classList.remove("active");
+    b.disabled = false;
+  });
 
   renderPromptVersions(result.prompt_versions);
   const meta = document.createElement("p");
@@ -39,6 +48,29 @@ export async function renderReport(result) {
     badge.style.color = a.valid ? "var(--ok)" : "var(--danger)";
     badge.classList.remove("hidden");
   } catch { /* audit is best-effort */ }
+}
+
+/** Wire the thumbs widget — one rating per click, comment optional. */
+export function initReportView() {
+  document.querySelectorAll(".fb-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!state.currentJob) return;
+      btn.disabled = true;
+      try {
+        await apiPost("/feedback", {
+          job_id: state.currentJob,
+          rating: btn.dataset.rating,
+          comment: $("#fb-comment").value.trim(),
+        });
+        btn.classList.add("active");
+        $("#fb-status").textContent = "thanks — feedback queued";
+      } catch (ex) {
+        btn.disabled = false;
+        $("#fb-status").textContent = `feedback failed: ${ex.message}`;
+        toast("Feedback failed", true);
+      }
+    });
+  });
 }
 
 function renderPromptVersions(versions) {

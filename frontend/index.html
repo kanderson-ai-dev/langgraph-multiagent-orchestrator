@@ -35,10 +35,10 @@
   <header class="border-b border-line/70">
     <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
       <div class="flex items-center gap-2.5">
-        <div class="w-7 h-7 rounded-md bg-gradient-to-br from-accent to-accent2 flex items-center justify-center">
+        <div class="w-7 h-7 rounded-md bg-gradient-to-br from-accent to-accent2 flex items-center justify-center" id="brand-mark">
           <span class="text-ink font-bold text-xs font-mono">S/W</span>
         </div>
-        <span class="font-semibold tracking-tight">orchestrator</span>
+        <span class="font-semibold tracking-tight" id="brand-name">orchestrator</span>
         <span class="text-[10px] font-mono text-muted border border-line rounded px-1.5 py-0.5 ml-1">v0.1</span>
       </div>
       <nav class="flex items-center gap-5 text-sm text-muted">
@@ -238,6 +238,26 @@
         label.textContent = "Generate report";
       }
     });
+  </script>
+  <script>
+    // White-label: name + logo from the public config endpoint. Accent
+    // colour stays fixed here (Tailwind CDN classes aren't var-driven) —
+    // the console applies it via its own token stylesheet.
+    fetch("/api/v1/config/ui").then(r => r.ok ? r.json() : null).then(cfg => {
+      if (!cfg) return;
+      if (cfg.product_name) {
+        document.title = document.title.replace(/^Orchestrator/, cfg.product_name);
+        const el = document.getElementById("brand-name");
+        if (el) el.textContent = cfg.product_name.toLowerCase();
+      }
+      if (cfg.logo_url) {
+        const mark = document.getElementById("brand-mark");
+        if (mark) {
+          mark.className = "w-7 h-7 flex items-center justify-center";
+          mark.innerHTML = `<img src="${encodeURI(cfg.logo_url)}" alt="" class="w-full h-full object-contain" />`;
+        }
+      }
+    }).catch(() => {});
   </script>
 </body>
 </html>
