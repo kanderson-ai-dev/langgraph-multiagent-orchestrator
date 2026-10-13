@@ -18,6 +18,7 @@ from typing import Any
 
 from app.core.config import Settings
 from app.main import configure_tracing
+from app.services.prompt_registry import PromptRegistry
 from evaluation.dataset import DATASET, EvalCase
 from evaluation.run_eval import _run_case
 
@@ -63,10 +64,11 @@ def _ensure_dataset(client: Any) -> Any:
 
 def _target_factory(settings: Settings) -> Any:
     """Replay each example through the real graph (fixture tools, stub LLM)."""
+    registry = PromptRegistry.load()  # promoted YAML prompts, no overlay
 
     def target(inputs: dict[str, Any]) -> dict[str, Any]:
         case = EvalCase.model_validate(inputs)
-        return asyncio.run(_run_case(case, settings))
+        return asyncio.run(_run_case(case, settings, registry))
 
     return target
 

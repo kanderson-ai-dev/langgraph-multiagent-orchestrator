@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-13T16:39:08.444504+00:00",
+  "generated_at": "2026-10-13T16:47:56.850792+00:00",
   "metrics": {
     "citation_support_rate": 1.0,
     "rubric_score_avg": 4.5,
@@ -18,6 +18,15 @@
     "debate_convergence_rate": true,
     "blocked_rate": true
   },
+  "prompt_versions": {
+    "researcher": 1,
+    "writer": 1,
+    "reviewer": 1
+  },
+  "prompt_overrides": {
+    "writer": 1,
+    "reviewer": 1
+  },
   "cases": [
     {
       "case_id": "rag-saas",
@@ -27,7 +36,13 @@
       "converged": true,
       "blocked": false,
       "expected_blocked": false,
-      "debate_rounds": 1
+      "debate_rounds": 1,
+      "duration_seconds": 0.013,
+      "prompt_versions": {
+        "researcher": 1,
+        "writer": 1,
+        "reviewer": 1
+      }
     },
     {
       "case_id": "eu-ai-act",
@@ -37,7 +52,13 @@
       "converged": true,
       "blocked": false,
       "expected_blocked": false,
-      "debate_rounds": 1
+      "debate_rounds": 1,
+      "duration_seconds": 0.005,
+      "prompt_versions": {
+        "researcher": 1,
+        "writer": 1,
+        "reviewer": 1
+      }
     },
     {
       "case_id": "pricing",
@@ -47,7 +68,13 @@
       "converged": true,
       "blocked": false,
       "expected_blocked": false,
-      "debate_rounds": 1
+      "debate_rounds": 1,
+      "duration_seconds": 0.006,
+      "prompt_versions": {
+        "researcher": 1,
+        "writer": 1,
+        "reviewer": 1
+      }
     },
     {
       "case_id": "multiagent",
@@ -57,7 +84,13 @@
       "converged": true,
       "blocked": false,
       "expected_blocked": false,
-      "debate_rounds": 1
+      "debate_rounds": 1,
+      "duration_seconds": 0.005,
+      "prompt_versions": {
+        "researcher": 1,
+        "writer": 1,
+        "reviewer": 1
+      }
     },
     {
       "case_id": "blocked-injection",
@@ -67,7 +100,9 @@
       "converged": false,
       "blocked": true,
       "expected_blocked": true,
-      "debate_rounds": 0
+      "debate_rounds": 0,
+      "duration_seconds": 0.002,
+      "prompt_versions": {}
     }
   ],
   "mode": "offline (stub LLM + fixture tools)"

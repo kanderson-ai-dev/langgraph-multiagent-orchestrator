@@ -88,6 +88,10 @@ class Settings(BaseSettings):
     # Cost governance: default per-job LLM budget; None = unlimited.
     default_job_budget_usd: float | None = Field(default=None, ge=0.0)
 
+    # Prompt lifecycle: max allowed regression vs the promoted version on
+    # score-type metrics during promotion gating (safety metrics use 0.0).
+    prompt_promotion_epsilon: float = Field(default=0.05, ge=0.0)
+
     @field_validator(
         "openai_api_key",
         "search_api_key",

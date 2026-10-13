@@ -8,6 +8,7 @@ Usage:
     uv run python -m evaluation.run_eval              # evaluate + write scorecard
     uv run python -m evaluation.run_eval --report     # also refresh TREND.md
     uv run python -m evaluation.run_eval --langsmith  # + LangSmith experiment
+    uv run python -m evaluation.run_eval --prompt-overrides writer=2,reviewer=1
 """
 
 import argparse
@@ -19,149 +20,35 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import Settings
-from app.graph.graph import build_graph, initial_state
-from app.graph.nodes.researcher import ResearchPlan
-from app.graph.nodes.reviewer import ReviewOutput
-from app.graph.nodes.writer import DraftCitation, DraftOutput
-from app.graph.state import Brief
-from app.services.llm_client import StubLLM
-from app.services.scraper_client import ScrapedPage
-from app.services.search_client import SearchResult
-from evaluation.dataset import DATASET, EvalCase
-from evaluation.evaluators import (
-    blocked_correctly,
-    citation_support,
-    debate_converged,
-    rubric_score,
+from app.services.prompt_eval import (
+    EDD_THRESHOLDS,
+    aggregate_metrics,
+    brief_for_case,
+    run_eval_case,
 )
+from app.services.prompt_registry import PromptRegistry, PromptRegistryError
+from evaluation.dataset import DATASET, EvalCase
 
 RESULTS_DIR = Path(__file__).parent / "results"
 SCORECARD_PATH = RESULTS_DIR / "scorecard.json"
 TREND_PATH = RESULTS_DIR / "TREND.md"
 
 # Thresholds — identical to the project objective table.
-THRESHOLDS = {
-    "citation_support_rate": 0.90,
-    "rubric_score_avg": 4.0,
-    "debate_convergence_rate": 0.85,
-    "blocked_rate": 1.0,
-}
-
-_FIXTURE_HTML = (
-    b"<html><title>Evidence</title><body>"
-    b"Enterprises adopting retrieval augmented generation report measurable "
-    b"grounding improvements and reduced hallucination rates in production."
-    b"</body></html>"
-)
+THRESHOLDS = EDD_THRESHOLDS
 
 
-class _FixtureSearch:
-    """Fixture-based search — deterministic, offline."""
-
-    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
-        return [
-            SearchResult(
-                title=f"Source for {query[:40]}",
-                url="https://eval.fixture/source",
-                snippet="fixture evidence",
-            )
-        ]
-
-
-class _FixtureScraper:
-    async def scrape(self, url: str) -> ScrapedPage:
-        return ScrapedPage(
-            url=url, status_code=200, content_type="text/html", body=_FIXTURE_HTML
-        )
-
-
-def _eval_llm() -> StubLLM:
-    """Deterministic outputs: grounded draft citing fixture text, approve."""
-    stub = StubLLM()
-    stub.register(
-        "ResearchPlan",
-        lambda s, c: ResearchPlan(sub_questions=["q"], queries=["eval query"]),
+async def _run_case(
+    case: EvalCase, settings: Settings, registry: PromptRegistry
+) -> dict[str, Any]:
+    metrics, state = await run_eval_case(
+        case_id=case.case_id,
+        brief=brief_for_case(case),
+        expect_blocked=case.expect_blocked,
+        settings=settings,
+        registry=registry,
     )
-    stub.register(
-        "DraftOutput",
-        lambda s, c: DraftOutput(
-            title="Evaluation Report",
-            markdown=(
-                "## Summary\nEnterprises adopting retrieval augmented "
-                "generation report measurable grounding improvements."
-            ),
-            citations=[
-                DraftCitation(
-                    claim="Grounding improves with retrieval",
-                    quote=(
-                        "Enterprises adopting retrieval augmented generation "
-                        "report measurable grounding improvements"
-                    ),
-                    source_url="https://eval.fixture/source",
-                )
-            ],
-        ),
-    )
-    stub.register(
-        "ReviewOutput",
-        lambda s, c: ReviewOutput(
-            verdict="approve",
-            score=4.5,
-            rubric={"structure": 4.5, "clarity": 4.5, "grounding": 4.5, "tone": 4.5},
-            feedback=[],
-        ),
-    )
-    return stub
-
-
-async def _run_case(case: EvalCase, settings: Settings) -> dict[str, Any]:
-    graph = build_graph(
-        settings,
-        llm=_eval_llm(),
-        search=_FixtureSearch(),  # type: ignore[arg-type]
-        scraper=_FixtureScraper(),  # type: ignore[arg-type]
-    )
-    state = initial_state(
-        job_id=f"eval-{case.case_id}",
-        workspace_id="eval",
-        brief=Brief(
-            topic=case.topic,
-            audience=case.audience,
-            tone=case.tone,
-            requirements=case.requirements,
-        ),
-        max_debate_rounds=settings.max_debate_rounds,
-    )
-    out = await graph.ainvoke(state)
-    return {
-        "case_id": case.case_id,
-        "status": out.get("status"),
-        "citation_support": citation_support(out),
-        "rubric_score": rubric_score(out),
-        "converged": debate_converged(out),
-        "blocked": blocked_correctly(out),
-        "expected_blocked": case.expect_blocked,
-        "debate_rounds": out.get("debate_round", 0),
-    }
-
-
-def _aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
-    normal = [r for r in results if not r["expected_blocked"]]
-    blocked = [r for r in results if r["expected_blocked"]]
-    return {
-        "citation_support_rate": (
-            sum(r["citation_support"] for r in normal) / len(normal) if normal else 0.0
-        ),
-        "rubric_score_avg": (
-            sum(r["rubric_score"] for r in normal) / len(normal) if normal else 0.0
-        ),
-        "debate_convergence_rate": (
-            sum(1 for r in normal if r["converged"]) / len(normal) if normal else 0.0
-        ),
-        "blocked_rate": (
-            sum(1 for r in blocked if r["blocked"]) / len(blocked) if blocked else 1.0
-        ),
-    }
+    metrics["prompt_versions"] = state.get("prompt_versions", {})
+    return metrics
 
 
 def _check_gates(metrics: dict[str, float]) -> dict[str, bool]:
@@ -194,6 +81,20 @@ def _write_trend(metrics: dict[str, float], results: list[dict[str, Any]]) -> No
     TREND_PATH.write_text("\n".join(lines), encoding="utf-8")
 
 
+def _parse_overrides(raw: str) -> dict[str, int]:
+    """``writer=2,reviewer=1`` → {writer: 2, reviewer: 1}."""
+    overrides: dict[str, int] = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if not pair:
+            continue
+        name, _eq, version = pair.partition("=")
+        if not name or not version.isdigit():
+            raise SystemExit(f"bad --prompt-overrides entry: {pair!r}")
+        overrides[name.strip()] = int(version)
+    return overrides
+
+
 async def _main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", action="store_true", help="write TREND.md")
@@ -202,14 +103,34 @@ async def _main() -> int:
         action="store_true",
         help="also publish the dataset and run a LangSmith experiment",
     )
+    parser.add_argument(
+        "--prompt-overrides",
+        default="",
+        help="pin prompt versions for the run, e.g. writer=2,reviewer=1",
+    )
     args = parser.parse_args()
 
     settings = Settings(
         _env_file=None, scrape_delay_seconds=0.0, scrape_respect_robots=False
     )
-    results = [await _run_case(c, settings) for c in DATASET]
-    metrics = _aggregate(results)
+    registry = PromptRegistry.load()  # YAML seeds only — deterministic eval
+    overrides = _parse_overrides(args.prompt_overrides)
+    if overrides:
+        for name, version in overrides.items():
+            try:
+                registry.get(name, version)
+            except PromptRegistryError as exc:
+                print(f"invalid --prompt-overrides: {exc}", file=sys.stderr)
+                return 2
+        registry = registry.with_overrides(overrides)
+
+    results = [await _run_case(c, settings, registry) for c in DATASET]
+    metrics = aggregate_metrics(results)
     gates = _check_gates(metrics)
+
+    prompt_versions: dict[str, int] = {}
+    for r in results:
+        prompt_versions.update(r.get("prompt_versions", {}))
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     scorecard = {
@@ -217,6 +138,8 @@ async def _main() -> int:
         "metrics": metrics,
         "thresholds": THRESHOLDS,
         "gates": gates,
+        "prompt_versions": prompt_versions,
+        "prompt_overrides": overrides,
         "cases": results,
         "mode": "offline (stub LLM + fixture tools)",
     }

@@ -16,6 +16,7 @@ from app.api.v1.routes.auth import router as auth_router
 from app.api.v1.routes.dashboard import router as dashboard_router
 from app.api.v1.routes.health import router as health_router
 from app.api.v1.routes.orchestration import router as orchestration_router
+from app.api.v1.routes.prompts import router as prompts_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.metrics import instrument_app
@@ -143,6 +144,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(orchestration_router, prefix=settings.api_prefix)
     app.include_router(dashboard_router, prefix=settings.api_prefix)
+    app.include_router(prompts_router, prefix=settings.api_prefix)
 
     # Frontend: public landing at `/`, operator console at `/console`.
     frontend = Path(__file__).resolve().parent.parent / "frontend"
