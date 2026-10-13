@@ -13,6 +13,7 @@ from _pytest.config import Config
 from _pytest.nodes import Item
 
 from app.core.config import Settings
+from app.services.prompt_registry import PromptRegistry
 
 # Marker -> env var that must be present (and non-empty) for the test to run.
 _MARKERS: dict[str, str] = {
@@ -35,6 +36,12 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:  #
 def settings() -> Iterator[Settings]:
     """Isolated settings for tests — no .env file, no real credentials."""
     yield Settings(_env_file=None)
+
+
+@pytest.fixture(scope="session")
+def prompts() -> PromptRegistry:
+    """Prompt Registry loaded from the repo's YAML seeds (read-only)."""
+    return PromptRegistry.load()
 
 
 @pytest.fixture()

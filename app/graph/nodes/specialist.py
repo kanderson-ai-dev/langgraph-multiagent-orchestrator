@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from app.framework.worker import StateUpdate
 from app.graph.state import AgentMessage, AnalystNote, Brief, EvidenceItem
 from app.services.llm_client import StructuredLLM
+from app.services.prompt_registry import PromptRegistry
 
 
 class SpecialistAnalysis(BaseModel):
@@ -26,12 +27,18 @@ class SpecialistWorker:
     """Generic domain specialist — the plug-and-play proof of the framework."""
 
     def __init__(
-        self, name: str, description: str, focus: str, llm: StructuredLLM
+        self,
+        name: str,
+        description: str,
+        focus: str,
+        llm: StructuredLLM,
+        prompts: PromptRegistry | None = None,
     ) -> None:
         self._name = name
         self._description = description
         self._focus = focus
         self._llm = llm
+        self._prompts = prompts
 
     @property
     def name(self) -> str:
@@ -58,14 +65,25 @@ class SpecialistWorker:
     async def run(self, state: dict[str, Any]) -> StateUpdate:
         from app.core.cost_tracking import tracked_structured
 
+        context: dict[str, Any] = {"brief": state["brief"].model_dump()}
+        if self._prompts is not None:
+            rendered = self._prompts.render(self._name)
+            system = rendered.text
+            context.update(
+                prompt_name=rendered.name,
+                prompt_version=rendered.version,
+                prompt_sha256=rendered.sha256,
+            )
+        else:
+            system = self._focus
         out = await tracked_structured(
             self._llm,
             SpecialistAnalysis,
             role=self._name,
             model="",
-            system=self._focus,
+            system=system,
             user=self._prompt(state),
-            context={"brief": state["brief"].model_dump()},
+            context=context,
         )
         note = AnalystNote(
             analyst=self._name,

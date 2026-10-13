@@ -14,10 +14,10 @@ from pydantic import BaseModel, Field
 from app.core.logging import get_logger
 from app.framework.worker import StateUpdate
 from app.graph.guardrails import sanitize_untrusted
-from app.graph.prompts import RESEARCHER_SYSTEM
 from app.graph.state import AgentMessage, Brief, EvidenceItem
 from app.services.document_parser import parse_document
 from app.services.llm_client import StructuredLLM
+from app.services.prompt_registry import PromptRegistry
 from app.services.scraper_client import ScraperClient
 from app.services.search_client import SearchClient
 
@@ -42,6 +42,7 @@ class ResearcherWorker:
         llm: StructuredLLM,
         search: SearchClient,
         scraper: ScraperClient,
+        prompts: PromptRegistry,
         *,
         max_queries: int = 5,
         max_results_per_query: int = 2,
@@ -49,6 +50,7 @@ class ResearcherWorker:
         self._llm = llm
         self._search = search
         self._scraper = scraper
+        self._prompts = prompts
         self._max_queries = max_queries
         self._max_results = max_results_per_query
 
@@ -91,14 +93,21 @@ class ResearcherWorker:
         mandate = str(state.get("mandate") or "")
         from app.core.cost_tracking import tracked_structured
 
+        system = self._prompts.render("researcher", max_queries=self._max_queries)
         plan = await tracked_structured(
             self._llm,
             ResearchPlan,
             role=self.name,
             model="",
-            system=RESEARCHER_SYSTEM.format(max_queries=self._max_queries),
+            system=system.text,
             user=self._plan_prompt(brief, mandate),
-            context={"brief": brief.model_dump(), "mandate": mandate},
+            context={
+                "brief": brief.model_dump(),
+                "mandate": mandate,
+                "prompt_name": system.name,
+                "prompt_version": system.version,
+                "prompt_sha256": system.sha256,
+            },
         )
         queries = plan.queries[: self._max_queries]
 

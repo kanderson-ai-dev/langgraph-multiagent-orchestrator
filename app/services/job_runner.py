@@ -21,6 +21,7 @@ from app.core.logging import get_logger
 from app.graph.graph import initial_state
 from app.graph.state import Brief
 from app.services.job_store import JobStore
+from app.services.prompt_registry import PromptRegistry
 from app.services.usage_store import UsageStore
 
 logger = get_logger(__name__)
@@ -35,11 +36,13 @@ class JobRunner:
         job_store: JobStore,
         usage_store: UsageStore,
         settings: Settings,
+        prompt_registry: PromptRegistry | None = None,
     ) -> None:
         self._graph = graph
         self._jobs = job_store
         self._usage = usage_store
         self._settings = settings
+        self._prompt_registry = prompt_registry
         self._events: dict[str, list[dict[str, Any]]] = {}
         self._queues: dict[str, list[asyncio.Queue[dict[str, Any]]]] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -52,6 +55,10 @@ class JobRunner:
     @property
     def usage_store(self) -> UsageStore:
         return self._usage
+
+    @property
+    def prompt_registry(self) -> PromptRegistry | None:
+        return self._prompt_registry
 
     def _emit(self, job_id: str, event: dict[str, Any]) -> None:
         self._events.setdefault(job_id, []).append(event)

@@ -14,6 +14,7 @@ RUN pip install -r requirements.txt
 
 COPY app/ app/
 COPY frontend/ frontend/
+COPY prompts/ prompts/
 
 # Non-root runtime user; data/ holds the SQLite job/checkpoint stores and is
 # the volume mount point for persistence.

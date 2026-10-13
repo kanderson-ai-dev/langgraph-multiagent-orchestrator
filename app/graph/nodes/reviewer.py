@@ -17,7 +17,6 @@ from pydantic import BaseModel, Field
 from app.core.metrics import DEBATE_ROUNDS_TOTAL
 from app.framework.worker import StateUpdate
 from app.graph.citations import citation_supported, support_rate
-from app.graph.prompts import REVIEWER_SYSTEM
 from app.graph.state import (
     AgentMessage,
     Brief,
@@ -28,6 +27,7 @@ from app.graph.state import (
     Verdict,
 )
 from app.services.llm_client import StructuredLLM
+from app.services.prompt_registry import PromptRegistry
 
 _SUPPORT_THRESHOLD = 0.90  # matches the EDD gate in the project objective
 
@@ -73,8 +73,9 @@ class ReviewerWorker:
     name = "reviewer"
     description = "Audits drafts against the rubric and verifies citations"
 
-    def __init__(self, llm: StructuredLLM) -> None:
+    def __init__(self, llm: StructuredLLM, prompts: PromptRegistry) -> None:
         self._llm = llm
+        self._prompts = prompts
 
     def _prompt(self, brief: Brief, draft: ReportDraft, kept: list[Citation]) -> str:
         reqs = "\n".join(f"- {r}" for r in brief.requirements) or "- (none)"
@@ -121,14 +122,20 @@ class ReviewerWorker:
 
         from app.core.cost_tracking import tracked_structured
 
+        system = self._prompts.render("reviewer")
         out = await tracked_structured(
             self._llm,
             ReviewOutput,
             role=self.name,
             model="",
-            system=REVIEWER_SYSTEM,
+            system=system.text,
             user=self._prompt(brief, draft, kept),
-            context={"draft_version": draft.version},
+            context={
+                "draft_version": draft.version,
+                "prompt_name": system.name,
+                "prompt_version": system.version,
+                "prompt_sha256": system.sha256,
+            },
         )
 
         rate = support_rate(len(kept), len(draft.citations))

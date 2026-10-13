@@ -10,7 +10,6 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.framework.worker import StateUpdate
-from app.graph.prompts import WRITER_SYSTEM
 from app.graph.state import (
     AgentMessage,
     AnalystNote,
@@ -21,6 +20,7 @@ from app.graph.state import (
 )
 from app.graph.teams import SECTION_TEMPLATES
 from app.services.llm_client import StructuredLLM
+from app.services.prompt_registry import PromptRegistry
 
 
 class DraftCitation(BaseModel):
@@ -39,8 +39,9 @@ class WriterWorker:
     name = "writer"
     description = "Drafts/revises the report in Markdown with verifiable citations"
 
-    def __init__(self, llm: StructuredLLM) -> None:
+    def __init__(self, llm: StructuredLLM, prompts: PromptRegistry) -> None:
         self._llm = llm
+        self._prompts = prompts
 
     def _prompt(self, state: dict[str, Any]) -> str:
         brief: Brief = state["brief"]
@@ -94,14 +95,21 @@ class WriterWorker:
         version = len(state.get("drafts", [])) + 1
         from app.core.cost_tracking import tracked_structured
 
+        system = self._prompts.render("writer")
         out = await tracked_structured(
             self._llm,
             DraftOutput,
             role=self.name,
             model="",
-            system=WRITER_SYSTEM,
+            system=system.text,
             user=self._prompt(state),
-            context={"brief": brief.model_dump(), "version": version},
+            context={
+                "brief": brief.model_dump(),
+                "version": version,
+                "prompt_name": system.name,
+                "prompt_version": system.version,
+                "prompt_sha256": system.sha256,
+            },
         )
         draft = ReportDraft(
             version=version,

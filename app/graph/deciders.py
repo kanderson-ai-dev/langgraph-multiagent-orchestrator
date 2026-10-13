@@ -12,8 +12,8 @@ from typing import Any
 
 from app.framework.registry import FINISH, WorkerRegistry
 from app.framework.supervisor import RouterDecider, RoutingDecision
-from app.graph.prompts import SUPERVISOR_SYSTEM
 from app.services.llm_client import StructuredLLM
+from app.services.prompt_registry import PromptRegistry
 
 
 class SupervisorRoute(RoutingDecision):
@@ -33,17 +33,29 @@ def _state_summary(state: dict[str, Any]) -> str:
     )
 
 
-def make_llm_decider(llm: StructuredLLM) -> RouterDecider:
-    """LLM-backed decider — the real Supervisor brain."""
+def make_llm_decider(llm: StructuredLLM, prompts: PromptRegistry) -> RouterDecider:
+    """LLM-backed decider — the real Supervisor brain.
+
+    The system prompt is rendered through the Prompt Registry so every
+    routing decision is attributable to a concrete prompt version.
+    """
 
     async def decide(state: dict[str, Any], registry: WorkerRegistry) -> RoutingDecision:
+        system = prompts.render(
+            "supervisor",
+            catalog=registry.catalog(),
+            state_summary=_state_summary(state),
+        )
         route = await llm.structured(
             SupervisorRoute,
-            system=SUPERVISOR_SYSTEM.format(
-                catalog=registry.catalog(), state_summary=_state_summary(state)
-            ),
+            system=system.text,
             user="Pick the next worker (or FINISH).",
-            context={"state_keys": sorted(state)},
+            context={
+                "state_keys": sorted(state),
+                "prompt_name": system.name,
+                "prompt_version": system.version,
+                "prompt_sha256": system.sha256,
+            },
         )
         return route
 

@@ -39,6 +39,7 @@ from app.graph.report_assembler import assemble_report
 from app.graph.state import AgentMessage, OrchestrationState
 from app.graph.teams import build_all_workers, team_for
 from app.services.llm_client import StructuredLLM, StubLLM
+from app.services.prompt_registry import DEFAULT_PROMPTS_DIR, PromptRegistry
 from app.services.scraper_client import ScraperClient
 from app.services.search_client import SearchClient
 
@@ -108,14 +109,21 @@ def build_graph(
     scraper: ScraperClient,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     decider: RouterDecider | None = None,
+    prompts: PromptRegistry | None = None,
 ) -> CompiledStateGraph[Any]:
-    """Compile the orchestration graph. Injectable deps keep it testable."""
+    """Compile the orchestration graph. Injectable deps keep it testable.
 
+    ``prompts`` is the Prompt Registry every agent renders its system
+    prompt through; when omitted, the YAML seeds under ``prompts/`` are
+    loaded (fails fast on any invalid artifact).
+    """
+
+    prompts = prompts or PromptRegistry.load(DEFAULT_PROMPTS_DIR)
     registry = WorkerRegistry()
     # Every known worker is a node; each job's `team` (from report_type)
     # narrows what the Supervisor may route to.
     for worker in build_all_workers(
-        llm=llm, search=search, scraper=scraper, settings=settings
+        llm=llm, search=search, scraper=scraper, settings=settings, prompts=prompts
     ):
         registry.register(worker)
     writer = registry.get("writer")
@@ -128,7 +136,7 @@ def build_graph(
         decider = (
             rule_based_decider
             if isinstance(llm, StubLLM)
-            else make_llm_decider(llm)
+            else make_llm_decider(llm, prompts)
         )
     supervisor = Supervisor(registry, decider, max_dispatches=25)
 

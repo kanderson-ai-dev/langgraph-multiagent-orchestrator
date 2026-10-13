@@ -4,7 +4,7 @@ Counters/histograms are defined here so nodes and routes share one registry;
 ``instrument_app`` wires the standard HTTP metrics middleware.
 """
 
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Gauge, Histogram
 from prometheus_fastapi_instrumentator import Instrumentator
 from starlette.applications import Starlette
 
@@ -44,6 +44,16 @@ BLOCKED_REQUESTS_TOTAL = Counter(
 BUDGET_EXCEEDED_TOTAL = Counter(
     "orchestrator_budget_exceeded_total",
     "Jobs escalated to human review because the LLM budget was exhausted",
+)
+PROMPT_VERSION_INFO = Gauge(
+    "orchestrator_prompt_version_info",
+    "Prompt registry versions (1 = currently promoted)",
+    ["name", "version"],
+)
+LLM_CALLS_TOTAL = Counter(
+    "orchestrator_llm_calls_total",
+    "LLM calls by agent role and prompt version",
+    ["role", "prompt_version"],
 )
 
 

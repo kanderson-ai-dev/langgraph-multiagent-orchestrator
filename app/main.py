@@ -23,6 +23,7 @@ from app.graph.graph import build_graph
 from app.services.job_runner import JobRunner
 from app.services.job_store import JobStore
 from app.services.llm_client import build_llm
+from app.services.prompt_registry import DEFAULT_PROMPTS_DIR, PromptRegistry
 from app.services.scraper_client import ScraperClient
 from app.services.search_client import build_search_client
 from app.services.usage_store import UsageStore
@@ -40,17 +41,25 @@ _SECURITY_HEADERS = {
 def build_runner(
     settings: Settings, checkpointer: BaseCheckpointSaver[Any] | None = None
 ) -> JobRunner:
-    """Construct the runner with a live (checkpointer-backed) graph."""
+    """Construct the runner with a live (checkpointer-backed) graph.
+
+    The Prompt Registry is loaded (and validated) here — a corrupt or
+    missing artifact raises and the app fails fast at startup.
+    """
     llm = build_llm(settings)
     search = build_search_client(settings)
     scraper = ScraperClient(settings)
+    prompts = PromptRegistry.load(
+        DEFAULT_PROMPTS_DIR, db_path=settings.database_path
+    )
     graph = build_graph(
         settings, llm=llm, search=search, scraper=scraper,
-        checkpointer=checkpointer,
+        checkpointer=checkpointer, prompts=prompts,
     )
     return JobRunner(
         graph, JobStore(settings.database_path),
         UsageStore(settings.database_path), settings,
+        prompt_registry=prompts,
     )
 
 
@@ -90,6 +99,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.runner = build_runner(settings, checkpointer=saver)
             app.state.job_store = app.state.runner.job_store
             app.state.usage_store = app.state.runner.usage_store
+        if not hasattr(app.state, "prompt_registry"):
+            app.state.prompt_registry = app.state.runner.prompt_registry
+        registry = getattr(app.state, "prompt_registry", None)
+        if registry is not None:
+            registry.publish_metrics()
         logger.info(
             "app_startup",
             app=settings.app_name,

@@ -38,23 +38,17 @@ def specialists_of(report_type: str) -> list[str]:
     return list(TEAMS.get(report_type, []))
 
 
-# Specialist definitions: (description shown to the Supervisor, system focus).
-SPECIALIST_ROLES: dict[str, tuple[str, str]] = {
+# Specialist definitions: name → description shown to the Supervisor.
+# Their system prompts live in the Prompt Registry
+# (``prompts/<name>/v<N>.yaml``), not in code.
+SPECIALIST_ROLES: dict[str, str] = {
     "financial_analyst": (
         "Analyzes evidence for financial signals: pricing, unit economics, "
-        "funding, TAM, revenue models and budget risk",
-        "You are the Financial Analyst on a report team. Read the gathered "
-        "evidence and extract the financially material facts: pricing models, "
-        "cost drivers, market size signals, funding/revenue indicators, and "
-        "budget or ROI risks. Be specific — cite numbers when present.",
+        "funding, TAM, revenue models and budget risk"
     ),
     "compliance_analyst": (
         "Analyzes evidence for regulatory/compliance exposure: obligations, "
-        "deadlines, certifications, legal risk",
-        "You are the Compliance Analyst on a report team. Read the gathered "
-        "evidence and extract regulatory obligations, deadlines, certification "
-        "requirements, jurisdictional differences, and legal exposure. Flag "
-        "anything that could create liability.",
+        "deadlines, certifications, legal risk"
     ),
 }
 
@@ -88,12 +82,14 @@ def build_all_workers(
     search: Any,
     scraper: Any,
     settings: Settings,
+    prompts: Any,
 ) -> list[Worker]:
     """Instantiate every worker the superset graph needs.
 
     The graph registers *all* workers as nodes; ``team`` state (from
     ``team_for``) restricts routing per job. Specialists are built generically
-    from ``SPECIALIST_ROLES``.
+    from ``SPECIALIST_ROLES``. Every worker receives the Prompt Registry so
+    all LLM prompts resolve to versioned artifacts.
     """
     from app.graph.nodes.researcher import ResearcherWorker
     from app.graph.nodes.reviewer import ReviewerWorker
@@ -101,10 +97,13 @@ def build_all_workers(
     from app.graph.nodes.writer import WriterWorker
 
     workers: list[Worker] = [
-        ResearcherWorker(llm, search, scraper, max_queries=settings.max_sub_questions),
-        WriterWorker(llm),
-        ReviewerWorker(llm),
+        ResearcherWorker(
+            llm, search, scraper, prompts,
+            max_queries=settings.max_sub_questions,
+        ),
+        WriterWorker(llm, prompts),
+        ReviewerWorker(llm, prompts),
     ]
-    for name, (description, focus) in SPECIALIST_ROLES.items():
-        workers.append(SpecialistWorker(name, description, focus, llm))
+    for name, description in SPECIALIST_ROLES.items():
+        workers.append(SpecialistWorker(name, description, "", llm, prompts=prompts))
     return workers

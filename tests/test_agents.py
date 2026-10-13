@@ -60,11 +60,12 @@ def _stub_llm() -> StubLLM:
 # ─── Researcher ─────────────────────────────────────────────────────────────
 
 
-async def test_researcher_gathers_evidence(brief: Brief) -> None:
+async def test_researcher_gathers_evidence(brief: Brief, prompts: Any) -> None:
     w = ResearcherWorker(
         llm=_stub_llm(),
         search=_FakeSearch(),
         scraper=_FakeScraper(),  # type: ignore[arg-type]
+        prompts=prompts,
         max_queries=3,
     )
     out = await w.run({"brief": brief})
@@ -77,7 +78,7 @@ async def test_researcher_gathers_evidence(brief: Brief) -> None:
 # ─── Writer ──────────────────────────────────────────────────────────────────
 
 
-async def test_writer_produces_versioned_draft(brief: Brief) -> None:
+async def test_writer_produces_versioned_draft(brief: Brief, prompts: Any) -> None:
     stub = StubLLM()
     stub.register(
         "DraftOutput",
@@ -93,7 +94,7 @@ async def test_writer_produces_versioned_draft(brief: Brief) -> None:
             ],
         ),
     )
-    w = WriterWorker(llm=stub)
+    w = WriterWorker(llm=stub, prompts=prompts)
     state = {"brief": brief, "evidence": _evidence()}
     out = await w.run(state)
     draft: ReportDraft = out["drafts"][0]
@@ -110,7 +111,7 @@ async def test_writer_produces_versioned_draft(brief: Brief) -> None:
 # ─── Reviewer ────────────────────────────────────────────────────────────────
 
 
-async def test_reviewer_verifies_citations(brief: Brief) -> None:
+async def test_reviewer_verifies_citations(brief: Brief, prompts: Any) -> None:
     stub = StubLLM()
     stub.register(
         "ReviewOutput",
@@ -123,7 +124,7 @@ async def test_reviewer_verifies_citations(brief: Brief) -> None:
             feedback=[],
         ),
     )
-    w = ReviewerWorker(llm=stub)
+    w = ReviewerWorker(llm=stub, prompts=prompts)
     draft = ReportDraft(
         version=1,
         title="T",
@@ -150,8 +151,8 @@ async def test_reviewer_verifies_citations(brief: Brief) -> None:
     assert any("citation" in f.lower() for f in verdict.feedback)
 
 
-async def test_reviewer_no_drafts() -> None:
-    w = ReviewerWorker(llm=StubLLM())
+async def test_reviewer_no_drafts(prompts: Any) -> None:
+    w = ReviewerWorker(llm=StubLLM(), prompts=prompts)
     out = await w.run({"brief": Brief(topic="x y z"), "evidence": [], "drafts": []})
     assert out["latest_verdict"].verdict == "revise"
 
