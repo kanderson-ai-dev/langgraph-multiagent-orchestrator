@@ -193,3 +193,63 @@ class UsageStore:
             event_count=int(row["n"]),
             by_role={r["role"]: float(r["c"]) for r in role_rows},
         )
+
+    async def per_role_stats(self, workspace_id: str) -> dict[str, dict[str, float]]:
+        """Cost, call count, mean latency per agent role (one tenant)."""
+        async with self._conn() as db:
+            cursor = await db.execute(
+                "SELECT role, SUM(cost_usd) AS c, COUNT(*) AS n,"
+                " AVG(latency_ms) AS lat, SUM(prompt_tokens) AS pt,"
+                " SUM(completion_tokens) AS ct"
+                " FROM usage_events WHERE workspace_id = ? GROUP BY role",
+                (workspace_id,),
+            )
+            rows = await cursor.fetchall()
+        return {
+            r["role"]: {
+                "cost_usd": float(r["c"]),
+                "calls": int(r["n"]),
+                "avg_latency_ms": float(r["lat"] or 0.0),
+                "prompt_tokens": int(r["pt"] or 0),
+                "completion_tokens": int(r["ct"] or 0),
+            }
+            for r in rows
+        }
+
+    async def prompt_version_mix(
+        self, workspace_id: str
+    ) -> list[dict[str, object]]:
+        """LLM calls grouped by (prompt_name, prompt_version)."""
+        async with self._conn() as db:
+            cursor = await db.execute(
+                "SELECT prompt_name, prompt_version, COUNT(*) AS n"
+                " FROM usage_events WHERE workspace_id = ?"
+                " AND prompt_name IS NOT NULL"
+                " GROUP BY prompt_name, prompt_version"
+                " ORDER BY prompt_name, prompt_version",
+                (workspace_id,),
+            )
+            rows = await cursor.fetchall()
+        return [
+            {
+                "prompt_name": r["prompt_name"],
+                "prompt_version": r["prompt_version"],
+                "calls": int(r["n"]),
+            }
+            for r in rows
+        ]
+
+    async def daily_cost(
+        self, workspace_id: str, *, days: int = 14
+    ) -> dict[str, float]:
+        """USD spend grouped by UTC day for the trend panel."""
+        async with self._conn() as db:
+            cursor = await db.execute(
+                "SELECT substr(created_at, 1, 10) AS day,"
+                " COALESCE(SUM(cost_usd), 0.0) AS c"
+                " FROM usage_events WHERE workspace_id = ?"
+                " AND created_at >= date('now', ?) GROUP BY day",
+                (workspace_id, f"-{days} days"),
+            )
+            rows = await cursor.fetchall()
+        return {r["day"]: float(r["c"]) for r in rows}

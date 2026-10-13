@@ -22,6 +22,31 @@ _current: contextvars.ContextVar["UsageTracker | None"] = contextvars.ContextVar
     "usage_tracker", default=None
 )
 
+# ─── model price table ────────────────────────────────────────────────────────
+# USD per 1M tokens: (input, output). Bumped whenever a model is added or a
+# price changes — the stamp surfaces on the dashboard so cost numbers are
+# attributable to a specific price sheet. Models not listed fall back to the
+# configurable COST_*_PRICE_PER_1M settings.
+PRICE_TABLE_VERSION = "2026-10"
+
+MODEL_PRICES: dict[str, tuple[float, float]] = {
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.00),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1-nano": (0.10, 0.40),
+}
+
+
+def price_for(model: str) -> tuple[float, float] | None:
+    """(input, output) USD per 1M for ``model`` — None when unlisted."""
+    if model in MODEL_PRICES:
+        return MODEL_PRICES[model]
+    # Prefix match covers dated variants ("gpt-4o-mini-2024-07-18").
+    for name, prices in MODEL_PRICES.items():
+        if model.startswith(name + "-"):
+            return prices
+    return None
+
 
 class UsageRecord(BaseModel):
     role: str
@@ -55,11 +80,19 @@ class UsageTracker:
         self._base_cost = base_cost
         self.records: list[UsageRecord] = []
 
-    def compute_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
-        return (
-            prompt_tokens / 1_000_000 * self._settings.cost_input_price_per_1m
-            + completion_tokens / 1_000_000 * self._settings.cost_output_price_per_1m
+    def compute_cost(
+        self,
+        prompt_tokens: int,
+        completion_tokens: int,
+        model: str | None = None,
+    ) -> float:
+        """Cost in USD — model price table when listed, else the
+        configurable default prices."""
+        in_p, out_p = (model and price_for(model)) or (
+            self._settings.cost_input_price_per_1m,
+            self._settings.cost_output_price_per_1m,
         )
+        return prompt_tokens / 1_000_000 * in_p + completion_tokens / 1_000_000 * out_p
 
     async def record_call(
         self,
@@ -73,7 +106,7 @@ class UsageTracker:
         prompt_version: int | None = None,
         prompt_sha256: str | None = None,
     ) -> UsageRecord:
-        cost = self.compute_cost(prompt_tokens, completion_tokens)
+        cost = self.compute_cost(prompt_tokens, completion_tokens, model=model)
         rec = UsageRecord(
             role=role,
             model=model,
@@ -147,14 +180,21 @@ async def tracked_structured(
 ) -> Any:
     """Call ``llm.structured`` and record token/cost usage under ``role``.
 
-    Token counts are estimated (chars/4) when the provider doesn't report
-    them — the stub path never fabricates usage, it estimates honestly.
+    Real provider token counts ride back on ``context["token_usage"]``
+    when the LLM reports them; the stub path estimates honestly
+    (chars/4) — estimates are never presented as provider data.
     """
     started = time.monotonic()
     result = await llm.structured(schema, system=system, user=user, context=context)
-    prompt_tokens = (len(system) + len(user)) // 4
-    completion_tokens = len(str(result)) // 4
     ctx = context or {}
+    usage = ctx.get("token_usage")
+    if isinstance(usage, dict) and usage.get("prompt_tokens") is not None:
+        prompt_tokens = int(usage["prompt_tokens"])
+        completion_tokens = int(usage["completion_tokens"] or 0)
+        ctx.pop("token_usage", None)
+    else:
+        prompt_tokens = (len(system) + len(user)) // 4
+        completion_tokens = len(str(result)) // 4
     await track_llm_call(
         role=role, model=model,
         prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,

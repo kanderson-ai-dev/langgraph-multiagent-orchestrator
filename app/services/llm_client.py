@@ -59,7 +59,10 @@ class OpenAIStructuredLLM:
         user: str,
         context: dict[str, Any] | None = None,
     ) -> _T:
-        runnable = self._model.with_structured_output(schema)
+        # include_raw gives us the AIMessage — its usage_metadata carries
+        # the provider's real token counts, which tracked_structured
+        # prefers over the chars/4 estimate.
+        runnable = self._model.with_structured_output(schema, include_raw=True)
         # Prompt provenance rides on the run config: LangSmith shows it as
         # run metadata + a `prompt:<name>@v<N>` tag when tracing is enabled;
         # it is inert otherwise (no behavior change offline).
@@ -76,11 +79,17 @@ class OpenAIStructuredLLM:
                     f"@v{context.get('prompt_version', '?')}"
                 ],
             }
-        result = await runnable.ainvoke(
+        out = await runnable.ainvoke(
             [{"role": "system", "content": system}, {"role": "user", "content": user}],
             config=config,
         )
-        return schema.model_validate(result)
+        usage = getattr(out.get("raw"), "usage_metadata", None)
+        if context is not None and isinstance(usage, dict):
+            context["token_usage"] = {
+                "prompt_tokens": usage.get("input_tokens"),
+                "completion_tokens": usage.get("output_tokens"),
+            }
+        return schema.model_validate(out.get("parsed"))
 
 
 # Builders produce deterministic, schema-valid outputs for offline/stub mode.

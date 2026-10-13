@@ -1,0 +1,134 @@
+{
+  "title": "LangGraph Orchestrator — Performance & Cost",
+  "uid": "lgo-perf",
+  "schemaVersion": 39,
+  "tags": ["langgraph", "orchestrator", "edd"],
+  "refresh": "30s",
+  "time": {"from": "now-24h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "title": "Jobs by terminal status",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "sum by (status) (increase(orchestrator_jobs_total[$__rate_interval]))",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "LLM cost by role (USD/h)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "sum by (role) (rate(orchestrator_llm_cost_usd_total[1h]))",
+          "legendFormat": "{{role}}"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}}
+    },
+    {
+      "id": 3,
+      "title": "Job latency p50 / p95",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(orchestrator_job_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(orchestrator_job_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 4,
+      "title": "Node latency p95",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, node) (rate(orchestrator_node_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{node}}"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 5,
+      "title": "LLM tokens by role & kind",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [
+        {
+          "expr": "sum by (role, kind) (rate(orchestrator_llm_tokens_total[$__rate_interval]))",
+          "legendFormat": "{{role}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Escalations & guardrails",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [
+        {
+          "expr": "sum by (resolution) (increase(orchestrator_human_review_total[$__rate_interval]))",
+          "legendFormat": "hitl {{resolution}}"
+        },
+        {
+          "expr": "increase(orchestrator_budget_exceeded_total[$__rate_interval])",
+          "legendFormat": "budget exceeded"
+        },
+        {
+          "expr": "increase(orchestrator_blocked_requests_total[$__rate_interval])",
+          "legendFormat": "blocked by guardrail"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Debate rounds",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "targets": [
+        {
+          "expr": "increase(orchestrator_debate_rounds_total[$__rate_interval])",
+          "legendFormat": "rounds"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Search/scrape cache hit ratio",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "targets": [
+        {
+          "expr": "sum by (kind) (rate(orchestrator_cache_hits_total{outcome=\"hit\"}[$__rate_interval])) / sum by (kind) (rate(orchestrator_cache_hits_total[$__rate_interval]))",
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+    },
+    {
+      "id": 9,
+      "title": "Promoted prompt versions",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 32},
+      "targets": [
+        {
+          "expr": "orchestrator_prompt_version_info",
+          "legendFormat": "{{name}}@v{{version}}"
+        }
+      ]
+    }
+  ]
+}
