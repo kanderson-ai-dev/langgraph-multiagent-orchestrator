@@ -154,6 +154,33 @@ audit sealing behave correctly without spending a cent. The same metrics run
 against the live model with real credentials. Never adjust a badge to look
 better than the measured number.
 
+### Baseline comparison (single prompt vs pipeline)
+
+Every eval case also runs a **single-prompt baseline** — one LLM call that
+drafts straight from the brief and the *same* evidence bundle: no supervisor,
+no debate, no citation verification, no input guardrail. It's the honest
+counterfactual the orchestration has to beat. Latest offline scorecard
+(`evaluation/results/scorecard.json` — informational, never gated):
+
+| Metric | Pipeline | Baseline |
+|---|---|---|
+| Citation support rate | **1.000** | 0.500 |
+| Reviewer rubric (1–5) | 4.500 | 4.500 |
+| Blocked-rate on injection case | **1.000** | 0.000 |
+| Avg LLM calls | 3.0 | 1.0 |
+| Avg cost per case (stub-estimated tokens) | $0.000189 | **$0.000108** |
+| Avg latency (stub) | 0.02s | **~0.00s** |
+
+Read this honestly: the offline stub *models* the classic single-shot failure
+(one grounded + one fabricated quote) so the table shows what citation
+verification and the input guardrail are *for* — the baseline ships an
+unverifiable quote and happily answers the injection brief. The baseline is
+also genuinely cheaper and faster, and rubric parity under the stub proves
+nothing about real-model quality — that comparison is a live-eval question
+the credential-gated workflow answers. What the pipeline buys is
+verification, safety, and bounded self-correction — at ~2× the stub-token
+cost and 3× the calls of a single prompt.
+
 ![EDD scorecard — all gates PASS](docs/screenshots/edd-scorecard.png)
 
 ### LangSmith experiment (real eval run)

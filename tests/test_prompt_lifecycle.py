@@ -19,7 +19,12 @@ from app.graph.nodes.reviewer import ReviewOutput, Rubric
 from app.main import create_app
 from app.services.job_store import JobStore
 from app.services.llm_client import StubLLM
-from app.services.prompt_eval import ABResult, build_eval_stub, run_ab_eval
+from app.services.prompt_eval import (
+    EDD_THRESHOLDS,
+    ABResult,
+    build_eval_stub,
+    run_ab_eval,
+)
 from app.services.prompt_registry import PromptRegistry
 from app.services.usage_store import UsageStore
 from evaluation.dataset import DATASET
@@ -181,7 +186,10 @@ def test_ab_test_runs_real_eval(client: TestClient) -> None:
     # Stub pipeline: identical prompts → identical (clean) metrics, zero deltas.
     assert body["promoted_metrics"]["citation_support_rate"] == 1.0
     assert body["candidate_metrics"]["rubric_score_avg"] > 0
-    assert all(d == 0 for d in body["deltas"].values())
+    # Gated metrics are deterministic under the stub — zero deltas.
+    # (Informational metrics like latency legitimately differ per run.)
+    for metric in EDD_THRESHOLDS:
+        assert body["deltas"][metric] == 0, metric
 
 
 def test_ab_test_unknown_version(client: TestClient) -> None:

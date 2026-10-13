@@ -11,13 +11,16 @@ inject a real ``StructuredLLM`` explicitly.
 """
 
 import asyncio
+import tempfile
 import time
 from collections.abc import Awaitable
+from pathlib import Path
 from typing import Any, Protocol, TypeVar, cast
 
 from pydantic import BaseModel
 
 from app.core.config import Settings
+from app.core.cost_tracking import UsageTracker, bind_tracker
 from app.graph.graph import build_graph, initial_state
 from app.graph.nodes.researcher import ResearchPlan
 from app.graph.nodes.reviewer import ReviewOutput, Rubric
@@ -27,6 +30,7 @@ from app.services.llm_client import StubLLM
 from app.services.prompt_registry import PromptRegistry
 from app.services.scraper_client import ScrapedPage
 from app.services.search_client import SearchResult
+from app.services.usage_store import UsageStore
 
 # Gated metrics — identical to the project objective / CI thresholds.
 EDD_THRESHOLDS: dict[str, float] = {
@@ -154,7 +158,17 @@ async def run_eval_case(
         max_debate_rounds=settings.max_debate_rounds,
     )
     started = time.monotonic()
-    out = cast(OrchestrationState, await graph.ainvoke(state))
+    # Bind a real usage tracker (throwaway sqlite) so cost/tokens are
+    # measured by the same code path production jobs use.
+    with tempfile.TemporaryDirectory() as tmp:
+        tracker = UsageTracker(
+            job_id=f"eval-{case_id}",
+            workspace_id="eval",
+            store=UsageStore(str(Path(tmp) / "usage.sqlite")),
+            settings=settings,
+        )
+        async with bind_tracker(tracker):
+            out = cast(OrchestrationState, await graph.ainvoke(state))
     metrics: dict[str, Any] = {
         "case_id": case_id,
         "status": out.get("status"),
@@ -165,6 +179,8 @@ async def run_eval_case(
         "expected_blocked": expect_blocked,
         "debate_rounds": out.get("debate_round", 0),
         "duration_seconds": round(time.monotonic() - started, 3),
+        "cost_usd": round(tracker.total_cost, 8),
+        "llm_calls": len(tracker.records),
     }
     return metrics, out
 
@@ -193,6 +209,18 @@ def aggregate_metrics(results: list[dict[str, Any]]) -> dict[str, float]:
         ),
         "blocked_rate": (
             sum(1 for r in blocked if r["blocked"]) / len(blocked) if blocked else 1.0
+        ),
+        # Informational (never gated): the cost/latency the gates buy.
+        "avg_cost_usd": (
+            sum(r["cost_usd"] for r in normal) / len(normal) if normal else 0.0
+        ),
+        "avg_latency_seconds": (
+            sum(r["duration_seconds"] for r in normal) / len(normal)
+            if normal
+            else 0.0
+        ),
+        "avg_llm_calls": (
+            sum(r["llm_calls"] for r in normal) / len(normal) if normal else 0.0
         ),
     }
 

@@ -4,6 +4,11 @@ Runs the dataset through the real compiled graph with a stubbed LLM and
 fixture-based search/scrape (zero network, zero credentials). Exits non-zero
 if any versioned threshold fails — the same gate CI enforces.
 
+Each case also runs the single-prompt baseline (one LLM call, no
+orchestration, no verification) over the *same* evidence bundle, and the
+scorecard stores both columns side-by-side — the honest counterfactual the
+pipeline must justify. Baseline numbers are informational, never gated.
+
 Usage:
     uv run python -m evaluation.run_eval              # evaluate + write scorecard
     uv run python -m evaluation.run_eval --report     # also refresh TREND.md
@@ -27,6 +32,7 @@ from app.services.prompt_eval import (
     run_eval_case,
 )
 from app.services.prompt_registry import PromptRegistry, PromptRegistryError
+from evaluation.baseline import aggregate_baseline, run_baseline_case
 from evaluation.dataset import DATASET, EvalCase
 
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -48,6 +54,13 @@ async def _run_case(
         registry=registry,
     )
     metrics["prompt_versions"] = state.get("prompt_versions", {})
+    metrics["baseline"] = await run_baseline_case(
+        case_id=case.case_id,
+        brief=brief_for_case(case),
+        evidence=state.get("evidence", []),
+        settings=settings,
+        review_system=registry.render("reviewer").text,
+    )
     return metrics
 
 
@@ -55,28 +68,64 @@ def _check_gates(metrics: dict[str, float]) -> dict[str, bool]:
     return {k: metrics[k] >= v for k, v in THRESHOLDS.items()}
 
 
-def _write_trend(metrics: dict[str, float], results: list[dict[str, Any]]) -> None:
+def build_scorecard(
+    metrics: dict[str, float],
+    baseline: dict[str, float],
+    gates: dict[str, bool],
+    results: list[dict[str, Any]],
+    prompt_versions: dict[str, int],
+    overrides: dict[str, int],
+) -> dict[str, Any]:
+    """The versioned scorecard payload — pipeline and baseline side-by-side."""
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "metrics": metrics,
+        "baseline_metrics": baseline,
+        "thresholds": THRESHOLDS,
+        "gates": gates,
+        "prompt_versions": prompt_versions,
+        "prompt_overrides": overrides,
+        "cases": results,
+        "mode": "offline (stub LLM + fixture tools)",
+    }
+
+
+def _write_trend(
+    metrics: dict[str, float],
+    baseline: dict[str, float],
+    results: list[dict[str, Any]],
+) -> None:
+    def _f(v: float, digits: int = 3) -> str:
+        return f"{v:.{digits}f}"
+
     lines = [
         "# EDD Trend History",
         "",
-        "| Run (UTC) | citation_support | rubric_avg | convergence | blocked |",
-        "|---|---|---|---|---|",
+        "| Run (UTC) | citation_support | rubric_avg | convergence | blocked "
+        "| base_support | base_rubric | base_cost_usd |",
+        "|---|---|---|---|---|---|---|---|",
         (
             f"| {datetime.now(UTC).isoformat()} | "
-            f"{metrics['citation_support_rate']:.3f} | "
-            f"{metrics['rubric_score_avg']:.2f} | "
-            f"{metrics['debate_convergence_rate']:.3f} | "
-            f"{metrics['blocked_rate']:.3f} |"
+            f"{_f(metrics['citation_support_rate'])} | "
+            f"{_f(metrics['rubric_score_avg'], 2)} | "
+            f"{_f(metrics['debate_convergence_rate'])} | "
+            f"{_f(metrics['blocked_rate'])} | "
+            f"{_f(baseline['citation_support_rate'])} | "
+            f"{_f(baseline['rubric_score_avg'], 2)} | "
+            f"{baseline['avg_cost_usd']:.6f} |"
         ),
         "",
         "## Latest case results",
         "",
     ]
     for r in results:
+        b = r["baseline"]
         lines.append(
             f"- `{r['case_id']}` — status={r['status']}, "
             f"support={r['citation_support']:.2f}, score={r['rubric_score']:.1f}, "
-            f"rounds={r['debate_rounds']}"
+            f"rounds={r['debate_rounds']}, cost=${r['cost_usd']:.6f} "
+            f"| baseline: support={b['citation_support']:.2f}, "
+            f"score={b['rubric_score']:.1f}, cost=${b['cost_usd']:.6f}"
         )
     TREND_PATH.write_text("\n".join(lines), encoding="utf-8")
 
@@ -93,6 +142,35 @@ def _parse_overrides(raw: str) -> dict[str, int]:
             raise SystemExit(f"bad --prompt-overrides entry: {pair!r}")
         overrides[name.strip()] = int(version)
     return overrides
+
+
+def _print_scorecard(
+    metrics: dict[str, float],
+    baseline: dict[str, float],
+    gates: dict[str, bool],
+) -> None:
+    print("Evaluation scorecard (pipeline vs single-prompt baseline):")
+    informational = {
+        "avg_cost_usd": ("avg_cost_usd", ".6f"),
+        "avg_latency_seconds": ("avg_latency_seconds", ".2f"),
+        "avg_llm_calls": ("avg_llm_calls", ".1f"),
+    }
+    for metric, threshold in THRESHOLDS.items():
+        mark = "PASS" if gates[metric] else "FAIL"
+        # Metrics the baseline has no notion of (e.g. debate convergence)
+        # render as n/a rather than a fake 0.000.
+        base = (
+            f"{baseline[metric]:.3f}" if metric in baseline else "n/a"
+        )
+        print(
+            f"  {mark} {metric}: pipeline={metrics[metric]:.3f} "
+            f"baseline={base} (threshold {threshold})"
+        )
+    for key, (base_key, fmt) in informational.items():
+        print(
+            f"  --- {key}: pipeline={metrics[key]:{fmt}} "
+            f"baseline={baseline.get(base_key, 0.0):{fmt}} (informational)"
+        )
 
 
 async def _main() -> int:
@@ -126,6 +204,7 @@ async def _main() -> int:
 
     results = [await _run_case(c, settings, registry) for c in DATASET]
     metrics = aggregate_metrics(results)
+    baseline = aggregate_baseline(results)
     gates = _check_gates(metrics)
 
     prompt_versions: dict[str, int] = {}
@@ -133,19 +212,12 @@ async def _main() -> int:
         prompt_versions.update(r.get("prompt_versions", {}))
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    scorecard = {
-        "generated_at": datetime.now(UTC).isoformat(),
-        "metrics": metrics,
-        "thresholds": THRESHOLDS,
-        "gates": gates,
-        "prompt_versions": prompt_versions,
-        "prompt_overrides": overrides,
-        "cases": results,
-        "mode": "offline (stub LLM + fixture tools)",
-    }
+    scorecard = build_scorecard(
+        metrics, baseline, gates, results, prompt_versions, overrides
+    )
     SCORECARD_PATH.write_text(json.dumps(scorecard, indent=2), encoding="utf-8")
     if args.report:
-        _write_trend(metrics, results)
+        _write_trend(metrics, baseline, results)
 
     if args.langsmith:
         from evaluation.langsmith_eval import run_langsmith_experiment
@@ -156,10 +228,7 @@ async def _main() -> int:
         else:
             print("LangSmith skipped: LANGCHAIN_API_KEY not configured")
 
-    print("Evaluation scorecard:")
-    for k, v in metrics.items():
-        mark = "PASS" if gates[k] else "FAIL"
-        print(f"  {mark} {k}: {v:.3f} (threshold {THRESHOLDS[k]})")
+    _print_scorecard(metrics, baseline, gates)
     failed = [k for k, ok in gates.items() if not ok]
     if failed:
         print(f"FAILED gates: {', '.join(failed)}", file=sys.stderr)
