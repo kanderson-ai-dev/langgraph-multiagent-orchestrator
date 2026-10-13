@@ -16,6 +16,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from app.api.v1.routes.auth import router as auth_router
 from app.api.v1.routes.dashboard import router as dashboard_router
 from app.api.v1.routes.feedback import router as feedback_router
+from app.api.v1.routes.health import api_router as health_api_router
 from app.api.v1.routes.health import router as health_router
 from app.api.v1.routes.orchestration import router as orchestration_router
 from app.api.v1.routes.prompts import router as prompts_router
@@ -193,6 +194,7 @@ def create_app() -> FastAPI:
 
     app.include_router(status_router)
     app.include_router(health_router)
+    app.include_router(health_api_router, prefix=settings.api_prefix)
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(orchestration_router, prefix=settings.api_prefix)
     app.include_router(dashboard_router, prefix=settings.api_prefix)

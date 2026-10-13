@@ -69,6 +69,15 @@ def test_public_status_is_payload_free(api_client: Any) -> None:
     assert "workspace" not in str(body).lower() or "workspace_id" not in body
 
 
+def test_api_health_alias(api_client: Any) -> None:
+    """GET /api/v1/health — the container/compose smoke-test route."""
+    r = api_client.get("/api/v1/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok"
+    assert set(body["integrations"]) >= {"llm", "search", "auth"}
+
+
 def test_eval_latest_serves_committed_scorecard(api_client: Any) -> None:
     r = api_client.get("/eval/latest")
     assert r.status_code == 200

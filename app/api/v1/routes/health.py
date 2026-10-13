@@ -10,6 +10,9 @@ from pydantic import BaseModel
 from app.core.config import Settings, get_settings
 
 router = APIRouter()
+# Mounted under the API prefix — the canonical smoke-test target
+# (container/compose health checks hit ``/api/v1/health``).
+api_router = APIRouter()
 
 
 class HealthStatus(BaseModel):
@@ -43,3 +46,9 @@ async def readiness(
             "auth": settings.auth_enabled,
         },
     )
+
+
+@api_router.get("/health")
+async def api_health(settings: Settings = Depends(get_settings)) -> ReadinessStatus:
+    """Versioned readiness alias — the Docker/compose smoke-test route."""
+    return await readiness(settings)
