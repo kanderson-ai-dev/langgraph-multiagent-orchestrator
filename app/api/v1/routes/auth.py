@@ -32,7 +32,7 @@ async def login(
 ) -> TokenResponse:
     # Rate-limit login attempts by client IP.
     client = request.client.host if request.client else "unknown"
-    if not limiter.allow(f"login:{client}"):
+    if not await limiter.allow(f"login:{client}"):
         raise HTTPException(status_code=429, detail="too many requests")
 
     if not settings.auth_enabled:

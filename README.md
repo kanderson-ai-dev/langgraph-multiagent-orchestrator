@@ -370,6 +370,29 @@ pypdf/pdfplumber · aiosqlite · structlog ·
 prometheus-fastapi-instrumentator · PyJWT · fpdf2 · pytest/respx · ruff ·
 mypy --strict · Playwright · uv · Docker.
 
+## 🧮 Horizontal scale (optional Redis backends)
+
+The rate limiter and the SSE event bus sit behind `RateLimiter` and
+`EventBus` protocols (`app/core/`). Single-process deployments use the
+in-memory implementations; setting `REDIS_URL` auto-selects the Redis
+backends so multiple replicas share limits and any replica can stream
+any job's events:
+
+```bash
+REDIS_URL=redis://localhost:6379/0
+```
+
+`docker-compose.override.yml` ships an optional Redis service (not
+loaded by default):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.override.yml up
+```
+
+Both backends pass the same parametrized contract test suite — CI uses
+`fakeredis`, never a real Redis. Remaining scale-out step: a `JobStore`
+protocol with a Postgres implementation (SQLite today is single-node).
+
 ## Known limitations & next steps
 
 - **Live latency sits near (not under) the p50 target**: parallel search +
@@ -378,13 +401,8 @@ mypy --strict · Playwright · uv · Docker.
   Writer↔Reviewer debate itself — sequential by design — plus keyless
   search latency; a paid provider (Tavily) would shave the research phase
   further.
-- Approving a budget escalation *before any draft exists* terminates the job
-  as `failed` — the report assembler has nothing to seal. A friendlier path
-  would convert "approve with no draft" into "fund & continue".
-- The audit trail seals the transcript but not yet the evidence payload —
-  hashing scraped content hashes would make the dossier fully reproducible.
-- In-process rate limiter and SSE bus are single-replica; scaling out needs
-  a shared store (e.g. Redis) for both.
+- The SQLite `JobStore` is single-node; the next step is a `JobStore`
+  protocol + Postgres implementation for true multi-replica state.
 - `workspace_id` isolation exists end-to-end, but there is no workspace
   management surface — tenants are implicit, not administrable.
 - LLM-as-judge and LangSmith experiments require live credentials; the

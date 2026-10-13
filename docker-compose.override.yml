@@ -1,0 +1,32 @@
+# Optional example overrides — NOT loaded unless you ask for them.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml up
+#
+# Adds a Redis service for multi-replica deployments. With REDIS_URL set
+# the app auto-selects RedisRateLimiter + RedisEventBus so rate limits
+# and SSE event fan-out work across N replicas.
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    # For >1 replica, deploy behind a load balancer (jobs are created on
+    # the replica that receives the POST but their events are visible to
+    # every replica via the Redis event bus).
+
+volumes:
+  redis-data:

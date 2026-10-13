@@ -11,7 +11,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import Settings, get_settings
-from app.core.rate_limit import RateLimiter
+from app.core.rate_limit import RateLimiter, build_rate_limiter
 from app.core.security import verify_token
 
 _bearer = HTTPBearer(auto_error=False)
@@ -24,11 +24,19 @@ class RequestContext:
     authenticated: bool
 
 
-_rate_limiter = RateLimiter(limit=60)
+_limiter: RateLimiter | None = None
 
 
 def get_rate_limiter() -> RateLimiter:
-    return _rate_limiter
+    """Lazily built shared limiter — Redis backend when REDIS_URL is set.
+
+    Built on first request (not import) so tests may override settings
+    before the backend is chosen.
+    """
+    global _limiter
+    if _limiter is None:
+        _limiter = build_rate_limiter(get_settings())
+    return _limiter
 
 
 async def get_context(

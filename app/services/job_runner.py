@@ -18,6 +18,7 @@ from langgraph.types import Command
 
 from app.core.config import Settings
 from app.core.cost_tracking import UsageTracker, bind_tracker
+from app.core.event_bus import EventBus, InMemoryEventBus
 from app.core.logging import get_logger
 from app.graph.graph import initial_state
 from app.graph.state import Brief
@@ -41,6 +42,7 @@ class JobRunner:
         settings: Settings,
         prompt_registry: PromptRegistry | None = None,
         scraper: ScraperClient | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._graph = graph
         self._jobs = job_store
@@ -48,8 +50,7 @@ class JobRunner:
         self._settings = settings
         self._prompt_registry = prompt_registry
         self._scraper = scraper
-        self._events: dict[str, list[dict[str, Any]]] = {}
-        self._queues: dict[str, list[asyncio.Queue[dict[str, Any]]]] = {}
+        self._bus: EventBus = event_bus or InMemoryEventBus()
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._last_values: dict[str, dict[str, Any]] = {}
         self._trace_ids: dict[str, str] = {}
@@ -66,29 +67,16 @@ class JobRunner:
     def prompt_registry(self) -> PromptRegistry | None:
         return self._prompt_registry
 
-    def _emit(self, job_id: str, event: dict[str, Any]) -> None:
-        self._events.setdefault(job_id, []).append(event)
-        for q in self._queues.get(job_id, []):
-            q.put_nowait(event)
+    async def _emit(self, job_id: str, event: dict[str, Any]) -> None:
+        await self._bus.publish(job_id, event)
 
-    def events(self, job_id: str) -> list[dict[str, Any]]:
-        return self._events.get(job_id, [])
+    async def events(self, job_id: str) -> list[dict[str, Any]]:
+        return await self._bus.history(job_id)
 
     async def stream(self, job_id: str) -> AsyncIterator[dict[str, Any]]:
         """Yield buffered then live events until the job reaches a terminal state."""
-        q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-        self._queues.setdefault(job_id, []).append(q)
-        try:
-            terminal_seen = False
-            for e in self.events(job_id):  # replay history first
-                yield e
-                terminal_seen = terminal_seen or bool(e.get("terminal"))
-            while not terminal_seen:
-                event = await q.get()
-                yield event
-                terminal_seen = bool(event.get("terminal"))
-        finally:
-            self._queues[job_id].remove(q)
+        async for e in self._bus.subscribe(job_id):
+            yield e
 
     async def submit(
         self,
@@ -144,7 +132,7 @@ class JobRunner:
             if rec is None:
                 continue
             expired.append(rec)
-            self._emit(
+            await self._emit(
                 job.job_id,
                 {
                     "node": "hitl_sweep",
@@ -200,11 +188,14 @@ class JobRunner:
                         state, config=config,
                         stream_mode=["updates", "values"],
                     ):
-                        self._handle_chunk(job_id, chunk)
+                        await self._handle_chunk(job_id, chunk)
         except Exception as exc:
             logger.exception("job_failed", job_id=job_id)
             await self._jobs.update_status(workspace_id, job_id, "failed")
-            self._emit(job_id, {"node": "runner", "error": str(exc), "terminal": True})
+            await self._emit(
+                job_id,
+                {"node": "runner", "error": str(exc), "terminal": True},
+            )
             return
         await self._finalize(job_id, workspace_id, started)
 
@@ -237,14 +228,17 @@ class JobRunner:
                         config=config,
                         stream_mode=["updates", "values"],
                     ):
-                        self._handle_chunk(job_id, chunk)
+                        await self._handle_chunk(job_id, chunk)
         except Exception as exc:
             logger.exception("resume_failed", job_id=job_id)
-            self._emit(job_id, {"node": "runner", "error": str(exc), "terminal": True})
+            await self._emit(
+                job_id,
+                {"node": "runner", "error": str(exc), "terminal": True},
+            )
             return
         await self._finalize(job_id, workspace_id, started)
 
-    def _handle_chunk(self, job_id: str, chunk: Any) -> None:
+    async def _handle_chunk(self, job_id: str, chunk: Any) -> None:
         # Multi-mode streams yield (mode, payload) tuples.
         if isinstance(chunk, tuple) and len(chunk) == 2:
             mode, payload = chunk
@@ -265,13 +259,13 @@ class JobRunner:
                 val = getattr(intr, "value", None)
                 if isinstance(val, dict):
                     reason = val.get("reason")
-                self._emit(
+                await self._emit(
                     job_id,
                     {"node": "human_review", "interrupt": True, "reason": reason},
                 )
                 continue
             msgs = update.get("transcript") if isinstance(update, dict) else None
-            self._emit(
+            await self._emit(
                 job_id,
                 {
                     "node": node,
@@ -381,7 +375,7 @@ class JobRunner:
         # Awaiting review is a pause, not a terminal state — keep the SSE
         # stream open so subscribers see events after the resume.
         terminal = status in ("done", "failed", "blocked", "expired")
-        self._emit(
+        await self._emit(
             job_id,
             {"node": "runner", "status": status,
              "terminal": terminal, "cost_usd": cost},

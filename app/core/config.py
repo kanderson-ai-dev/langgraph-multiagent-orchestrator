@@ -113,6 +113,10 @@ class Settings(BaseSettings):
     # Rate limiting
     rate_limit_per_minute: int = Field(default=60, ge=0)
 
+    # Optional Redis for horizontal-scale backends (rate limiter, SSE
+    # event bus). None = single-process in-memory implementations.
+    redis_url: SecretStr | None = None
+
     # Persistence
     database_path: str = "data/orchestrator.sqlite"
     checkpoint_db_path: str = "data/checkpoints.sqlite"
@@ -135,6 +139,7 @@ class Settings(BaseSettings):
         "langfuse_secret_key",
         "jwt_secret_key",
         "admin_password_hash",
+        "redis_url",
         mode="before",
     )
     @classmethod

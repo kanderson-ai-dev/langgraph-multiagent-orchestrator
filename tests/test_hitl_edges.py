@@ -225,7 +225,7 @@ async def test_expire_stale_marks_old_jobs(tmp_path: Any) -> None:
     # SSE subscribers see a terminal expiry event.
     assert any(
         e.get("node") == "hitl_sweep" and e.get("terminal")
-        for e in runner.events(old.job_id)
+        for e in await runner.events(old.job_id)
     )
 
 

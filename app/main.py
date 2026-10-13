@@ -18,6 +18,7 @@ from app.api.v1.routes.health import router as health_router
 from app.api.v1.routes.orchestration import router as orchestration_router
 from app.api.v1.routes.prompts import router as prompts_router
 from app.core.config import Settings, get_settings
+from app.core.event_bus import build_event_bus
 from app.core.logging import configure_logging, get_logger
 from app.core.metrics import instrument_app
 from app.graph.graph import build_graph
@@ -67,6 +68,7 @@ def build_runner(
         graph, JobStore(settings.database_path),
         UsageStore(settings.database_path), settings,
         prompt_registry=prompts, scraper=scraper,
+        event_bus=build_event_bus(settings),
     )
 
 

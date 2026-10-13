@@ -73,7 +73,7 @@ async def submit(
     limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> JobResponse:
     client = ctx.subject or (request.client.host if request.client else "anon")
-    if not limiter.allow(f"submit:{client}"):
+    if not await limiter.allow(f"submit:{client}"):
         raise HTTPException(status_code=429, detail="too many requests")
 
     try:
