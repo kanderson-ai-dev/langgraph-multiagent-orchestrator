@@ -1,111 +1,75 @@
 {
   "queries": {
-    "Key obligations for B2B startups under the EU AI Act": [
+    "Penalties and consequences for non-compliance with the EU AI Act in the startup sector": [
       {
-        "title": "EU AI Act from August 2026: 5 duties for B2B shops",
-        "url": "https://www.commerce-partner.com/en/blog/eu-ai-act-obligations-b2b-shop-operators/",
-        "snippet": "Starting 2 August 2026, EU AI Act obligations will apply to B2B shops. What needs to be done now \u2014 with practical examples and recommended next steps."
+        "title": "EU AI Act Penalties: Fines, Enforcement & Compliance Risks",
+        "url": "https://www.gdprregister.eu/articles/eu-ai-act-penalties/",
+        "snippet": "Fines, Enforcement & Compliance Risks Explained The EU AI Act introduces a strict and tiered penalty framework for non-compliance, similar in structure to GDPR but with even broader scope. For organisations deploying or developing AI systems, understanding these penalties is critical. The risks extend beyond financial fines \u2014 including reputational damage, civil liability, and potential ..."
       },
       {
-        "title": "The AI Act in Europe: What B2B Companies Must Do Now - europages",
-        "url": "https://www.europages.co.uk/inside-business/news/what-businesses-must-implement-now-under-europes-ai-act",
-        "snippet": "Since August 2025, EU rules under the AI Act apply to general-purpose AI, with high-risk obligations due in 2026. Discover penalties, enforcement, and key compliance steps for B2Bs."
+        "title": "EU AI Act Fines & Penalties 2026: Full Tier Breakdown",
+        "url": "https://aiactindex.eu/eu-ai-act/penalties",
+        "snippet": "Recovering fines from non-EU providers The Act applies extraterritorially. Non-EU providers of high-risk systems must designate an authorised representative established in the Union under Article 22, and that representative carries co-responsibility for compliance and is the practical addressee for enforcement."
       }
     ],
-    "Cost analysis of compliance with EU AI Act for early-stage startups": [
+    "Comparative analysis of compliance obligations based on type of AI application in B2B startups": [
       {
-        "title": "How much does EU AI Act compliance actually cost?",
-        "url": "https://auroratrust.ai/eu-ai-act-cost/",
-        "snippet": "What EU AI Act compliance actually costs in 2026: consultants \u20ac15k-\u20ac80k per system, enterprise programmes \u20ac100k-\u20ac300k+, or compliance software from \u20ac49/month. A full cost breakdown by method, obligation, and company size - plus the cost of non-compliance."
+        "title": "Global AI Regulations: Comparative Analysis 2026",
+        "url": "https://amlegalsai.com/insights/ai-regulations-global",
+        "snippet": "Comparative analysis of AI regulatory frameworks across 8 jurisdictions: enforcement mechanisms, penalty structures, compliance obligations, and strategic implications for multinational AI deployment."
       },
       {
-        "title": "EU AI Act Compliance Cost: A Clear 2026 Breakdown",
-        "url": "https://governancedocs.com/eu-ai-act-compliance-cost/",
-        "snippet": "Sep 13, 2026 \u00b7 Read both EU AI Act compliance cost figures with two facts in mind. The per-system figures assume the quality management system already exists \u2014 building one is the large fixed cost neither number isolates well."
+        "title": "Artificial intelligence policy worldwide: a comparative analysis",
+        "url": "https://royalsocietypublishing.org/rsos/article/13/2/242234/480264/Artificial-intelligence-policy-worldwide-a",
+        "snippet": "Feb 11, 2026 \u00b7 The AI Basic Act represents a layered, risk-based approach to regulation and applies to all organizations whose AI activities affect South Korea, including foreign entities, which must designate a domestic representative to ensure compliance."
       }
     ],
-    "Timeline for compliance with the EU AI Act for startups": [
+    "Overview of the EU AI Act obligations for businesses and their compliance timeline": [
       {
         "title": "Timeline for the Implementation of the EU AI Act",
         "url": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act",
         "snippet": "Aug 1, 2024 \u00b7 The EU\u2019s AI Act legislation applies progressively, with a full roll-out of the main application milestones foreseen by 2 August 2028. The timeline takes into account the AI Act amendments introduced by Digital Omnibus on AI."
       },
       {
-        "title": "EU AI Act Deadlines: The Clear 2026 Timeline Guide",
-        "url": "https://governancedocs.com/eu-ai-act-deadlines/",
-        "snippet": "Jul 17, 2026 \u00b7 Knowing the EU AI Act deadlines lets you sequence your work, prioritise what is already due, and avoid a last-minute scramble as the heavier obligations land. This guide lays out the full timeline and what each milestone requires."
+        "title": "EU AI Act Timeline: Key Compliance Deadlines for 2027-2028",
+        "url": "https://policy-insider.ai/eu-ai-act-timeline-key-compliance-deadlines-for-2027-2028/",
+        "snippet": "May 27, 2026 \u00b7 You\u2019ll see which actors carry which obligations, the risk classification that determines your regulatory burden, a milestone-by-milestone timeline through 2028, and the eight core duties (Articles 9\u201315, 43) that every provider of a high-risk system must meet before the December 2027 cliff edge."
       }
     ],
-    "Available resources and support for B2B startups to comply with the EU AI Act": [
+    "EU AI Act compliance timeline for startups": [
       {
-        "title": "EU AI Act Compliance Guide: 18-Month B2B Roadmap",
-        "url": "https://valasysaitech.com/eu-ai-act-compliance-b2b-guide/",
-        "snippet": "Step-by-step EU AI Act compliance for B2B tech companies, including risk classification, technical requirements, cost budgeting, and a practical 18-month implementation timeline."
+        "title": "The EU AI Act Compliance Guide for Startups and AI Companies",
+        "url": "https://blog.promise.legal/startup-central/the-eu-ai-act-compliance-guide-for-startups-and-ai-companies/",
+        "snippet": "The EU AI Act Compliance Guide for Startups and AI Companies The EU AI Act introduces risk-based regulation for any startup serving EU users or enterprise customers. This guide covers risk tiers, prohibited practices, documentation requirements, and a timeline for building compliance into your product cycle."
       },
       {
-        "title": "EU AI Act 2026: Essential Transparency Compliance For B2B Tech Leaders ...",
-        "url": "https://www.growthhq.io/our-thinking/eu-ai-act-2026-essential-transparency-compliance-for-b2b-tech-leadershow-to-scale-generative-ai-safely-and-legally-across-europe",
-        "snippet": "August 2026: The EU AI Act's Transparency Enforcement - What Every B2B Leader Must Know and Do Now The global AI landscape has shifted. On 2 August 2026, the EU AI Act's Article 50 transparency rules entered full enforcement across Europe's vast business ecosystem. This isn't just a regulatory tweak for AI startups or model developers\u2014it's a sweeping mandate covering every ..."
+        "title": "EU AI Act: Complete Compliance Guide (2025-2028)",
+        "url": "https://www.regulation-ai.eu/en/ai-act/",
+        "snippet": "On this page What is the EU AI Act? Who must comply? The four risk tiers Application timeline High-risk AI systems: what triggers full obligations? Key compliance obligations for high-risk AI providers Convergence with DORA and NIS2 The EU AI Act (Regulation 2024/1689) is the world's first comprehensive AI law. It applies in tiers: prohibited practices from February 2025, GPAI rules from ..."
       }
     ],
-    "Comparison of EU AI Act compliance obligations with other regulatory frameworks for startups": [
+    "EU AI Act cost estimates for early-stage B2B startups": [
       {
-        "title": "AI Regulatory Frameworks: EU, UK, China, and US",
-        "url": "https://www.aiacto.eu/en/blog/ai-regulatory-frameworks-eu-uk-china-us-compared",
-        "snippet": "Aug 11, 2026 \u00b7 The European Union has adopted a comprehensive regulatory approach with the AI Act, which entered into force on 1 August 2024. Regulation (EU) 2024/1689 classifies AI systems according to their level of risk."
-      },
-      {
-        "title": "EU AI Act International Compliance Finale 2026: Complete ...",
-        "url": "https://sota.io/blog/eu-ai-act-international-compliance-finale-multi-framework-comparison-2026",
-        "snippet": "May 30, 2026 \u00b7 This five-post series demonstrated a consistent pattern across all six frameworks: the EU AI Act sets the highest compliance bar, combining legally binding obligations, prescriptive documentation templates, and significant penalties."
-      }
-    ],
-    "List of obligations for B2B startups under the EU AI Act": [
-      {
-        "title": "EU AI Act Checklist: What Applies to You in 2026 | Regulation AI",
-        "url": "https://www.regulation-ai.eu/en/compliance-checklist/",
-        "snippet": "Sep 12, 2026 \u00b7 A step-by-step EU AI Act compliance checklist in question-and-answer form: scope, deadlines still ahead, risk classification, prohibited practices, GPAI, high-risk conformity, and role-by-role obligations for providers and deployers."
-      },
-      {
-        "title": "EU AI Act from August 2026: 5 duties for B2B shops",
-        "url": "https://www.commerce-partner.com/en/blog/eu-ai-act-obligations-b2b-shop-operators/",
-        "snippet": "May 8, 2026 \u00b7 Starting 2 August 2026, EU AI Act obligations will apply to B2B shops. What needs to be done now \u2014 with practical examples and recommended next steps."
-      }
-    ],
-    "Compliance cost analysis for early-stage B2B startups under EU AI Act": [
-      {
-        "title": "How much does EU AI Act compliance actually cost?",
-        "url": "https://auroratrust.ai/eu-ai-act-cost/",
-        "snippet": "What EU AI Act compliance actually costs in 2026: consultants \u20ac15k-\u20ac80k per system, enterprise programmes \u20ac100k-\u20ac300k+, or compliance software from \u20ac49/month. A full cost breakdown by method, obligation, and company size - plus the cost of non-compliance."
+        "title": "EU AI Act Startup Cost: Scope Before Budget | Wavect",
+        "url": "https://wavect.io/blog/eu-ai-act-compliance-cost-startup/",
+        "snippet": "May 26, 2026 \u00b7 There is no statutory or dependable universal EU AI Act compliance price for a startup. Cost depends on the operator role, intended purpose, classification route, existing evidence and other applicable law."
       },
       {
         "title": "EU AI Act Compliance Cost: A Clear 2026 Breakdown",
         "url": "https://governancedocs.com/eu-ai-act-compliance-cost/",
-        "snippet": "EU AI Act compliance cost by risk tier: the Commission's \u20ac6,000-\u20ac7,000 per high-risk system, the \u20ac400,000 critics' figure, 10 cost lines, and Omnibus savings."
+        "snippet": "Sep 13, 2026 \u00b7 The EU AI Act compliance cost ranges above are typical market figures for 2026, built up from the cost lines below; your own will move with the number of systems, whether a management system already exists, and whether you develop models or buy them."
       }
     ],
-    "Resources for startups to comply with EU AI Act": [
+    "Support resources for EU AI Act compliance startups": [
       {
-        "title": "EU AI Act Compliance: What Startups Need to Know",
-        "url": "https://policyforge.co/blog/eu-ai-act-compliance-what-startups-need-to-know",
-        "snippet": "The EU AI Act\u2014the world's first comprehensive AI regulation\u2014is now in force with critical deadlines approaching in 2025-2026. This guide helps startups navigate compliance requirements, from understanding the risk-based framework to implementing practical steps for market access."
+        "title": "AI Regulatory Compliance - EY AI Compliance",
+        "url": "https://www.bing.com/aclick?ld=e8eJGOYr_n14UjFIRLQqjw0TVUCUwExjhBfxY9vtM2GbaxK4MmMTVarGNfPQ6g_KH3E8hBVbWNdD40TUtyHH-lTqAFP4-9NtJcuZEyDt0SnPAdhBWeJHoYOUGvGdaN3fm1kCdXedf-KpBxZe-Lm020IxhgK2r9FIS2ubEe3oCJx7s2kO4zhq6JlDdo5UpcmSr6H2yGQw&u=aHR0cHMlM2ElMmYlMmZhZC5kb3VibGVjbGljay5uZXQlMmZzZWFyY2hhZHMlMmZsaW5rJTJmY2xpY2slM2ZsaWQlM2Q0MzcwMDA4NDQ4OTIwOTQ2NSUyNmRzX3Nfa3dnaWQlM2Q1ODcwMDAwOTE0Mjk4MzUzOSUyNmRzX2FfY2lkJTNkNzY1Njc4MTEzNyUyNmRzX2FfY2FpZCUzZDIzMzM1NDQwOTQwJTI2ZHNfYV9hZ2lkJTNkMjAxNjU1NDIyOTQwJTI2ZHNfYV9saWQlM2Rrd2QtMjIwMzAzMjY2NDI0MiUyNiUyNmRzX2VfYWRpZCUzZDc3MzA5NjYyMDIxMjE5JTI2ZHNfZV90YXJnZXRfaWQlM2Rrd2QtNzczMTAzNzQ5MTkzNTclM2Fsb2MtMzglMjYlMjZkc19lX25ldHdvcmslM2RvJTI2ZHNfdXJsX3YlM2QyJTI2ZHNfZGVzdF91cmwlM2RodHRwcyUzYSUyZiUyZnd3dy5leS5jb20lMmZlbl91cyUyZnNlcnZpY2VzJTJmYWklMmZyZXNwb25zaWJsZS1haSUzZldULm1jX2lkJTNkMTA2ODM2MTklMjZBQS50c3JjJTNkcGFpZHNlYXJjaCUyNmdjbGlkJTNkODkxOWVmYjk2MDcxMTRlMTFiN2U4NTc3ZWFhNmRkOGElMjZnY2xzcmMlM2QzcC5kcyUyNiUyNm1zY2xraWQlM2Q4OTE5ZWZiOTYwNzExNGUxMWI3ZTg1NzdlYWE2ZGQ4YQ&rlid=8919efb9607114e11b7e8577eaa6dd8a",
+        "snippet": "EY teams support AI compliance, trust and responsible AI governance. Explore AI compliance readiness, regulation and trust frameworks."
       },
       {
         "title": "Resources | AI Act Service Desk",
         "url": "https://ai-act-service-desk.ec.europa.eu/en/resources",
         "snippet": "Jul 31, 2026 \u00b7 Find legal and policy documents as well as communication materials such as fact sheets related to the EU AI Act."
-      }
-    ],
-    "Differences in EU AI Act obligations for startups vs established businesses": [
-      {
-        "title": "EU AI Act 2026 Obligations \u2014 Deployers, Providers and Risk ...",
-        "url": "https://euaiact.pro/en/obligations-2026/",
-        "snippet": "A practical guide to EU AI Act 2026 obligations: the difference between deployers and providers, risk classification, key deadlines. Take the free self-assessment in 2 minutes."
-      },
-      {
-        "title": "EU AI Act Compliance for Startups and SMEs",
-        "url": "https://www.euai-act.com/articles/eu-ai-act-startups-sme-compliance",
-        "snippet": "May 12, 2026 \u00b7 SMEs and startups have the same substantive obligations as large enterprises when they place AI systems on the EU market or have outputs used in the EU. There is no general size-based exemption."
       }
     ]
   }

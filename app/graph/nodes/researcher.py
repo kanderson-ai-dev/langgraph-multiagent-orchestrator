@@ -46,6 +46,7 @@ class ResearcherWorker:
         *,
         max_queries: int = 5,
         max_results_per_query: int = 2,
+        scrape_top_k: int = 8,
     ) -> None:
         self._llm = llm
         self._search = search
@@ -53,6 +54,7 @@ class ResearcherWorker:
         self._prompts = prompts
         self._max_queries = max_queries
         self._max_results = max_results_per_query
+        self._scrape_top_k = scrape_top_k
 
     def _plan_prompt(self, brief: Brief, mandate: str = "") -> str:
         reqs = "\n".join(f"- {r}" for r in brief.requirements) or "- (none given)"
@@ -67,9 +69,11 @@ class ResearcherWorker:
             f"Language: {brief.language}"
         )
 
-    async def _gather_url(self, url: str, query: str) -> EvidenceItem | None:
+    async def _gather_url(
+        self, url: str, query: str, workspace_id: str
+    ) -> EvidenceItem | None:
         try:
-            page = await self._scraper.scrape(url)
+            page = await self._scraper.scrape(url, workspace_id=workspace_id)
         except Exception as exc:
             logger.info("scrape_skipped", url=url, reason=str(exc))
             return None
@@ -96,6 +100,7 @@ class ResearcherWorker:
 
     async def run(self, state: dict[str, Any]) -> StateUpdate:
         brief: Brief = state["brief"]
+        workspace_id = str(state.get("workspace_id") or "")
         mandate = str(state.get("mandate") or "")
         from app.core.cost_tracking import tracked_structured
 
@@ -124,7 +129,10 @@ class ResearcherWorker:
         # logged per query and skipped exactly as before.
         search_results = await asyncio.gather(
             *(
-                self._search.search(q, max_results=self._max_results)
+                self._search.search(
+                    q, max_results=self._max_results,
+                    workspace_id=workspace_id,
+                )
                 for q in queries
             ),
             return_exceptions=True,
@@ -135,8 +143,10 @@ class ResearcherWorker:
                 continue
             candidate_urls.extend((r.url, q) for r in results)
 
-        # Dedupe (queries often overlap), then scrape concurrently — the
-        # scraper itself bounds in-flight fetches and per-domain politeness.
+        # Dedupe (queries often overlap), keep rank order — user-supplied
+        # sources first, then search rank — and scrape only the top-K
+        # unique candidates: low-ranked results rarely survive citation
+        # verification anyway, so skipping them saves real fetch latency.
         seen: set[str] = set()
         unique_urls: list[tuple[str, str]] = []
         for u, q in candidate_urls:
@@ -144,7 +154,10 @@ class ResearcherWorker:
                 seen.add(u)
                 unique_urls.append((u, q))
         gathered = await asyncio.gather(
-            *(self._gather_url(u, q) for u, q in unique_urls)
+            *(
+                self._gather_url(u, q, workspace_id)
+                for u, q in unique_urls[: self._scrape_top_k]
+            )
         )
         evidence = [item for item in gathered if item is not None]
 

@@ -5,6 +5,7 @@ when search is disabled entirely.
 """
 
 import asyncio
+import json
 from typing import Protocol, runtime_checkable
 
 import httpx
@@ -18,6 +19,7 @@ from tenacity import (
 
 from app.core.config import Settings
 from app.core.logging import get_logger
+from app.services.cache_store import CacheStore
 
 logger = get_logger(__name__)
 
@@ -32,7 +34,9 @@ class SearchResult(BaseModel):
 
 @runtime_checkable
 class SearchClient(Protocol):
-    async def search(self, query: str, *, max_results: int) -> list[SearchResult]: ...
+    async def search(
+        self, query: str, *, max_results: int, workspace_id: str = ""
+    ) -> list[SearchResult]: ...
 
 
 class TavilySearchClient:
@@ -46,7 +50,9 @@ class TavilySearchClient:
         wait=wait_exponential(min=1, max=8),
         reraise=True,
     )
-    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+    async def search(
+        self, query: str, *, max_results: int, workspace_id: str = ""
+    ) -> list[SearchResult]:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.post(
                 _TAVILY_URL,
@@ -80,7 +86,9 @@ class DuckDuckGoSearchClient:
     def __init__(self, *, timeout: float = 15.0) -> None:
         self._timeout = timeout
 
-    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+    async def search(
+        self, query: str, *, max_results: int, workspace_id: str = ""
+    ) -> list[SearchResult]:
         def _sync_search() -> list[SearchResult]:
             from ddgs import DDGS
 
@@ -102,16 +110,78 @@ class DuckDuckGoSearchClient:
 class NullSearchClient:
     """Provider ``none``: always returns no results."""
 
-    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+    async def search(
+        self, query: str, *, max_results: int, workspace_id: str = ""
+    ) -> list[SearchResult]:
         return []
 
 
-def build_search_client(settings: Settings) -> SearchClient:
+class CachingSearchClient:
+    """Per-tenant day-scoped search cache around any ``SearchClient``.
+
+    A cached result list satisfies a request only when it covers the
+    requested ``max_results`` (it is then truncated) — never returns
+    another workspace's rows.
+    """
+
+    def __init__(
+        self, inner: SearchClient, cache: CacheStore, *, ttl_hours: float
+    ) -> None:
+        self._inner = inner
+        self._cache = cache
+        self._ttl = ttl_hours
+
+    async def search(
+        self, query: str, *, max_results: int, workspace_id: str = ""
+    ) -> list[SearchResult]:
+        if not workspace_id:
+            return await self._inner.search(
+                query, max_results=max_results, workspace_id=workspace_id
+            )
+        key = " ".join(query.lower().split())
+        raw = await self._cache.get(
+            "search", workspace_id, key, ttl_hours=self._ttl
+        )
+        if raw is not None:
+            try:
+                results = [SearchResult.model_validate(r) for r in json.loads(raw)]
+            except Exception:
+                results = []
+            if len(results) >= max_results:
+                from app.core.metrics import CACHE_HITS_TOTAL
+
+                CACHE_HITS_TOTAL.labels(kind="search", outcome="hit").inc()
+                return results[:max_results]
+        from app.core.metrics import CACHE_HITS_TOTAL
+
+        CACHE_HITS_TOTAL.labels(kind="search", outcome="miss").inc()
+        results = await self._inner.search(
+            query, max_results=max_results, workspace_id=workspace_id
+        )
+        await self._cache.put(
+            "search", workspace_id, key,
+            json.dumps([r.model_dump() for r in results]),
+        )
+        return results
+
+
+def build_search_client(
+    settings: Settings, *, cache: CacheStore | None = None
+) -> SearchClient:
     provider = settings.effective_search_provider
+    inner: SearchClient
     if provider == "tavily" and settings.search_api_key is not None:
-        return TavilySearchClient(settings.search_api_key.get_secret_value())
-    if provider == "duckduckgo":
-        return DuckDuckGoSearchClient(timeout=settings.scrape_timeout_seconds)
-    if provider == "tavily":  # configured but key vanished — degrade loudly-but-safely
-        logger.warning("search_provider=tavily but no SEARCH_API_KEY; using 'none'")
-    return NullSearchClient()
+        inner = TavilySearchClient(settings.search_api_key.get_secret_value())
+    elif provider == "duckduckgo":
+        inner = DuckDuckGoSearchClient(timeout=settings.scrape_timeout_seconds)
+    else:
+        if provider == "tavily":  # key vanished — degrade loudly-but-safely
+            logger.warning(
+                "search_provider=tavily but no SEARCH_API_KEY; using 'none'"
+            )
+        inner = NullSearchClient()
+    if cache is not None and settings.cache_enabled:
+        return CachingSearchClient(
+            inner, cache, ttl_hours=settings.cache_ttl_hours
+        )
+    return inner

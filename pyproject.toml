@@ -12,6 +12,7 @@ dependencies = [
     "ddgs>=9.0.0",
     "fastapi>=0.115.0",
     "fpdf2>=2.8",
+    "h2>=4.2,<5",
     "httpx>=0.28.0",
     "langchain>=1.4.5",
     "langchain-core>=0.3.0",

@@ -13,8 +13,12 @@ async def summary(
     request: Request,
     ctx: RequestContext = Depends(get_context),
 ) -> dict[str, object]:
+    from app.core.latency import LATENCY
+
     store: UsageStore = request.app.state.usage_store
     s = await store.workspace_summary(ctx.workspace_id)
+    quantiles = LATENCY.quantiles()
+    job = quantiles.pop("job", {})
     return {
         "workspace_id": ctx.workspace_id,
         "total_cost_usd": s.total_cost_usd,
@@ -23,4 +27,7 @@ async def summary(
         "avg_latency_ms": s.avg_latency_ms,
         "llm_calls": s.event_count,
         "cost_by_role": s.by_role,
+        # Per-node p50/p95 wall seconds (rolling window) + job-segment latency.
+        "node_latency_seconds": quantiles,
+        "job_latency_seconds": job,
     }

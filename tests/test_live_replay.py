@@ -45,7 +45,9 @@ class _ReplaySearch:
                 "queries", {}
             )
 
-    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+    async def search(
+        self, query: str, *, max_results: int, workspace_id: str = ""
+    ) -> list[SearchResult]:
         hits = self._queries.get(query, [])
         return [SearchResult(**h) for h in hits[:max_results]]
 

@@ -69,7 +69,9 @@ _FIXTURE_HTML = (
 class FixtureSearch:
     """Fixture-based search — deterministic, offline."""
 
-    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+    async def search(
+        self, query: str, *, max_results: int, workspace_id: str = ""
+    ) -> list[SearchResult]:
         return [
             SearchResult(
                 title=f"Source for {query[:40]}",
@@ -80,7 +82,7 @@ class FixtureSearch:
 
 
 class FixtureScraper:
-    async def scrape(self, url: str) -> ScrapedPage:
+    async def scrape(self, url: str, *, workspace_id: str = "") -> ScrapedPage:
         return ScrapedPage(
             url=url, status_code=200, content_type="text/html", body=_FIXTURE_HTML
         )

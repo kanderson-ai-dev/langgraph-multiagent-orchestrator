@@ -19,7 +19,9 @@ class _SpySearch:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+    async def search(
+        self, query: str, *, max_results: int, workspace_id: str = ""
+    ) -> list[SearchResult]:
         self.calls += 1
         return [SearchResult(title="t", url="https://src.test/a", snippet="s")]
 
@@ -28,7 +30,7 @@ class _SpyScraper:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def scrape(self, url: str) -> ScrapedPage:
+    async def scrape(self, url: str, *, workspace_id: str = "") -> ScrapedPage:
         self.calls += 1
         return ScrapedPage(
             url=url, status_code=200, content_type="text/html",

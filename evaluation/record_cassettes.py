@@ -158,7 +158,9 @@ class _RecordingSearch:
         self._inner = inner
         self.captures: dict[str, list[dict[str, Any]]] = {}
 
-    async def search(self, query: str, *, max_results: int) -> list[Any]:
+    async def search(
+        self, query: str, *, max_results: int, workspace_id: str = ""
+    ) -> list[Any]:
         results = await self._inner.search(query, max_results=max_results)
         self.captures[query] = [
             r.model_dump() if hasattr(r, "model_dump") else dict(r)

@@ -83,26 +83,34 @@ def build_all_workers(
     scraper: Any,
     settings: Settings,
     prompts: Any,
+    llm_overrides: dict[str, Any] | None = None,
 ) -> list[Worker]:
     """Instantiate every worker the superset graph needs.
 
     The graph registers *all* workers as nodes; ``team`` state (from
     ``team_for``) restricts routing per job. Specialists are built generically
     from ``SPECIALIST_ROLES``. Every worker receives the Prompt Registry so
-    all LLM prompts resolve to versioned artifacts.
+    all LLM prompts resolve to versioned artifacts. ``llm_overrides`` maps a
+    worker name to a role-specific LLM (e.g. ``REVIEWER_MODEL``) — absent
+    entries share the default ``llm``.
     """
     from app.graph.nodes.researcher import ResearcherWorker
     from app.graph.nodes.reviewer import ReviewerWorker
     from app.graph.nodes.specialist import SpecialistWorker
     from app.graph.nodes.writer import WriterWorker
 
+    overrides = llm_overrides or {}
     workers: list[Worker] = [
         ResearcherWorker(
             llm, search, scraper, prompts,
             max_queries=settings.max_sub_questions,
+            scrape_top_k=settings.research_scrape_top_k,
         ),
-        WriterWorker(llm, prompts),
-        ReviewerWorker(llm, prompts),
+        WriterWorker(overrides.get("writer", llm), prompts),
+        ReviewerWorker(
+            overrides.get("reviewer", llm), prompts,
+            citation_shortcircuit=settings.reviewer_citation_shortcircuit,
+        ),
     ]
     for name, description in SPECIALIST_ROLES.items():
         workers.append(SpecialistWorker(name, description, "", llm, prompts=prompts))

@@ -31,12 +31,14 @@ def _evidence() -> list[EvidenceItem]:
 
 
 class _FakeSearch:
-    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+    async def search(
+        self, query: str, *, max_results: int, workspace_id: str = ""
+    ) -> list[SearchResult]:
         return [SearchResult(title="t", url="https://src.test/rag", snippet="s")]
 
 
 class _FakeScraper:
-    async def scrape(self, url: str) -> ScrapedPage:
+    async def scrape(self, url: str, *, workspace_id: str = "") -> ScrapedPage:
         html = (
             b"<html><title>RAG overview</title><body>RAG systems retrieve "
             b"documents to ground generation in sources.</body></html>"

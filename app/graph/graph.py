@@ -14,6 +14,7 @@ once the Reviewer issues a verdict the bound is enforced deterministically
 via ``decide_next_after_verdict`` — termination is structural, not hoped-for.
 """
 
+import time
 from collections.abc import Hashable
 from typing import Any
 
@@ -58,7 +59,30 @@ def _as_node(worker: Worker) -> Any:
     async def node(state: OrchestrationState) -> dict[str, Any]:
         return await worker.run(dict(state))
 
-    return node
+    return _timed(worker.name, node)
+
+
+def _timed(name: str, fn: Any) -> Any:
+    """Wrap a node callable with per-node wall-time instrumentation.
+
+    Feeds both the Prometheus ``orchestrator_node_seconds`` histogram and
+    the in-process quantile tracker the dashboard reads for p50/p95.
+    """
+
+    async def wrapped(state: OrchestrationState) -> dict[str, Any]:
+        start = time.monotonic()
+        try:
+            result: dict[str, Any] = await fn(state)
+            return result
+        finally:
+            seconds = time.monotonic() - start
+            from app.core.latency import LATENCY
+            from app.core.metrics import NODE_SECONDS
+
+            NODE_SECONDS.labels(node=name).observe(seconds)
+            LATENCY.observe(name, seconds)
+
+    return wrapped
 
 
 def _register_stub_builders(llm: StubLLM) -> None:
@@ -110,6 +134,7 @@ def build_graph(
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     decider: RouterDecider | None = None,
     prompts: PromptRegistry | None = None,
+    llm_overrides: dict[str, StructuredLLM] | None = None,
 ) -> CompiledStateGraph[Any]:
     """Compile the orchestration graph. Injectable deps keep it testable.
 
@@ -123,7 +148,8 @@ def build_graph(
     # Every known worker is a node; each job's `team` (from report_type)
     # narrows what the Supervisor may route to.
     for worker in build_all_workers(
-        llm=llm, search=search, scraper=scraper, settings=settings, prompts=prompts
+        llm=llm, search=search, scraper=scraper, settings=settings,
+        prompts=prompts, llm_overrides=llm_overrides,
     ):
         registry.register(worker)
     writer = registry.get("writer")
@@ -190,25 +216,42 @@ def build_graph(
                 nxt = reviewer.name
                 reason = f"new draft v{drafts[-1].version} pending review"
             else:
-                # Debate bound is deterministic — never left to the decider.
-                nxt = decide_next_after_verdict(
-                    approved=verdict.verdict == "approve",
-                    rounds_used=rounds,
-                    max_rounds=max_rounds,
-                    proposer=writer.name,
+                # Early exit: a high-scoring draft whose citations all
+                # verified doesn't earn another paid writer round.
+                threshold = settings.review_early_exit_score
+                early_exit = (
+                    verdict.verdict == "revise"
+                    and threshold is not None
+                    and verdict.score >= threshold
+                    and verdict.unsupported_citations == 0
                 )
-                if nxt == writer.name:
+                if early_exit:
+                    nxt = FINISH
                     reason = (
-                        f"Revision requested (round {rounds}/{max_rounds}) — "
-                        "sending the draft back to the Writer."
+                        f"Early exit — reviewer scored {verdict.score:.1f} "
+                        f"(≥{threshold}) with all citations verified; "
+                        "skipping another debate round."
                     )
-                elif verdict.verdict == "approve":
-                    reason = "Draft approved — assembling the final report."
                 else:
-                    reason = (
-                        f"Debate budget exhausted ({rounds}/{max_rounds} "
-                        "rounds) — escalating to human review."
+                    # Debate bound is deterministic — never left to the decider.
+                    nxt = decide_next_after_verdict(
+                        approved=verdict.verdict == "approve",
+                        rounds_used=rounds,
+                        max_rounds=max_rounds,
+                        proposer=writer.name,
                     )
+                    if nxt == writer.name:
+                        reason = (
+                            f"Revision requested (round {rounds}/{max_rounds}) — "
+                            "sending the draft back to the Writer."
+                        )
+                    elif verdict.verdict == "approve":
+                        reason = "Draft approved — assembling the final report."
+                    else:
+                        reason = (
+                            f"Debate budget exhausted ({rounds}/{max_rounds} "
+                            "rounds) — escalating to human review."
+                        )
         else:
             # The decider only sees (and may only pick) this job's team —
             # minus any worker that already hit its dispatch cap. A worker
@@ -468,12 +511,12 @@ def build_graph(
         return {"final_report": None}
 
     builder = StateGraph(OrchestrationState)
-    builder.add_node("input_guardrail", input_guardrail_node)
-    builder.add_node("supervisor", supervisor_node)
-    builder.add_node("human_review", human_review_node)
-    builder.add_node("report_assembler", report_assembler_node)
-    builder.add_node("output_guardrail", output_guardrail_node)
-    builder.add_node("rejection_output", rejection_output_node)
+    builder.add_node("input_guardrail", _timed("input_guardrail", input_guardrail_node))
+    builder.add_node("supervisor", _timed("supervisor", supervisor_node))
+    builder.add_node("human_review", _timed("human_review", human_review_node))
+    builder.add_node("report_assembler", _timed("report_assembler", report_assembler_node))
+    builder.add_node("output_guardrail", _timed("output_guardrail", output_guardrail_node))
+    builder.add_node("rejection_output", _timed("rejection_output", rejection_output_node))
     for worker in registry:
         builder.add_node(worker.name, _as_node(worker))
 

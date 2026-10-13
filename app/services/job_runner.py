@@ -23,6 +23,7 @@ from app.graph.graph import initial_state
 from app.graph.state import Brief
 from app.services.job_store import JobRecord, JobStore
 from app.services.prompt_registry import PromptRegistry
+from app.services.scraper_client import ScraperClient
 from app.services.tracing import bind_trace
 from app.services.usage_store import UsageStore
 
@@ -39,12 +40,14 @@ class JobRunner:
         usage_store: UsageStore,
         settings: Settings,
         prompt_registry: PromptRegistry | None = None,
+        scraper: ScraperClient | None = None,
     ) -> None:
         self._graph = graph
         self._jobs = job_store
         self._usage = usage_store
         self._settings = settings
         self._prompt_registry = prompt_registry
+        self._scraper = scraper
         self._events: dict[str, list[dict[str, Any]]] = {}
         self._queues: dict[str, list[asyncio.Queue[dict[str, Any]]]] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -293,6 +296,13 @@ class JobRunner:
             pass
         status = str(values.get("status", "failed"))
         cost = await self._usage.job_cost(job_id)
+        # Job-level latency (active segment — HITL pauses excluded).
+        elapsed = time.monotonic() - started
+        from app.core.latency import LATENCY
+        from app.core.metrics import JOB_DURATION_SECONDS
+
+        JOB_DURATION_SECONDS.observe(elapsed)
+        LATENCY.observe("job", elapsed)
         if status == "done":
             transcript = list(values.get("transcript", []))
             from app.services.audit import chain_transcript
@@ -383,3 +393,8 @@ class JobRunner:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+
+    async def aclose(self) -> None:
+        """Release owned resources (pooled scraper connections)."""
+        if self._scraper is not None:
+            await self._scraper.aclose()

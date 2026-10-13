@@ -82,9 +82,16 @@ class ReviewerWorker:
     name = "reviewer"
     description = "Audits drafts against the rubric and verifies citations"
 
-    def __init__(self, llm: StructuredLLM, prompts: PromptRegistry) -> None:
+    def __init__(
+        self,
+        llm: StructuredLLM,
+        prompts: PromptRegistry,
+        *,
+        citation_shortcircuit: bool = True,
+    ) -> None:
         self._llm = llm
         self._prompts = prompts
+        self._citation_shortcircuit = citation_shortcircuit
 
     def _prompt(self, brief: Brief, draft: ReportDraft, kept: list[Citation]) -> str:
         reqs = "\n".join(f"- {r}" for r in brief.requirements) or "- (none)"
@@ -126,8 +133,47 @@ class ReviewerWorker:
             }
 
         draft = drafts[-1]
+        # Deterministic citation pre-check runs before the LLM call — a
+        # draft that already fails verification will be revised anyway, so
+        # spending tokens on the rubric is pure waste.
         kept, dropped, _hashes = verify_citations(draft, evidence)
         DEBATE_ROUNDS_TOTAL.inc()
+        rate = support_rate(len(kept), len(draft.citations))
+
+        if (
+            self._citation_shortcircuit
+            and dropped
+            and rate < _SUPPORT_THRESHOLD
+        ):
+            feedback = [
+                f"{dropped} citation(s) could not be verified against the "
+                f"fetched source text (support rate {rate:.2f}); re-cite or "
+                "remove them."
+            ]
+            verdict = ReviewVerdict(
+                draft_version=draft.version,
+                verdict="revise",
+                score=3.0,
+                rubric={},
+                feedback=feedback,
+                unsupported_citations=dropped,
+            )
+            msg = AgentMessage(
+                sender=self.name, recipient="writer", kind="verdict",
+                content=(
+                    f"v{draft.version}: revise (citation pre-check failed, "
+                    f"support {rate:.2f})"
+                ),
+                round=debate_round,
+            )
+            from app.core.cost_tracking import current_cost
+
+            return {
+                "latest_verdict": verdict,
+                "debate_round": debate_round,
+                "cost_so_far": current_cost(),
+                "transcript": [msg],
+            }
 
         from app.core.cost_tracking import tracked_structured
 
@@ -147,7 +193,6 @@ class ReviewerWorker:
             },
         )
 
-        rate = support_rate(len(kept), len(draft.citations))
         verdict_str: Verdict = "approve" if out.verdict == "approve" else "revise"
         feedback = list(out.feedback)
         if dropped:

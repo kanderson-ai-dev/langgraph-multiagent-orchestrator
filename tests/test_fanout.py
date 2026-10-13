@@ -19,12 +19,14 @@ from app.services.search_client import SearchResult
 
 
 class _FakeSearch:
-    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+    async def search(
+        self, query: str, *, max_results: int, workspace_id: str = ""
+    ) -> list[SearchResult]:
         return [SearchResult(title="t", url="https://src.test/a", snippet="s")]
 
 
 class _FakeScraper:
-    async def scrape(self, url: str) -> ScrapedPage:
+    async def scrape(self, url: str, *, workspace_id: str = "") -> ScrapedPage:
         return ScrapedPage(
             url=url, status_code=200, content_type="text/html",
             body=b"<html><body>fan out evidence text</body></html>",

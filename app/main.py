@@ -48,20 +48,25 @@ def build_runner(
     The Prompt Registry is loaded (and validated) here — a corrupt or
     missing artifact raises and the app fails fast at startup.
     """
+    from app.services.cache_store import CacheStore
+    from app.services.llm_client import build_llm_overrides
+
     llm = build_llm(settings)
-    search = build_search_client(settings)
-    scraper = ScraperClient(settings)
+    cache = CacheStore(settings.database_path) if settings.cache_enabled else None
+    search = build_search_client(settings, cache=cache)
+    scraper = ScraperClient(settings, cache=cache)
     prompts = PromptRegistry.load(
         DEFAULT_PROMPTS_DIR, db_path=settings.database_path
     )
     graph = build_graph(
         settings, llm=llm, search=search, scraper=scraper,
         checkpointer=checkpointer, prompts=prompts,
+        llm_overrides=build_llm_overrides(settings),
     )
     return JobRunner(
         graph, JobStore(settings.database_path),
         UsageStore(settings.database_path), settings,
-        prompt_registry=prompts,
+        prompt_registry=prompts, scraper=scraper,
     )
 
 
@@ -138,6 +143,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         sweeper.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await sweeper
+        with contextlib.suppress(Exception):
+            await app.state.runner.aclose()
     shutdown_tracing()
     logger.info("app_shutdown")
 

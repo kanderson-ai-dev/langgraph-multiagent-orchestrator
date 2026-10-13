@@ -46,6 +46,10 @@ class OpenAIStructuredLLM:
             # can briefly saturate the org TPM limit mid-run.
             max_retries=6,
         )
+        # Bounded outputs: schemas already cap completion size; the setting
+        # is an extra seatbelt when configured (None = provider default).
+        if settings.llm_max_tokens is not None:
+            self._model.max_tokens = settings.llm_max_tokens
 
     async def structured(
         self,
@@ -120,6 +124,21 @@ def build_llm(settings: Settings) -> StructuredLLM:
     if settings.openai_api_key is not None:
         return OpenAIStructuredLLM(settings)
     return StubLLM()
+
+
+def build_llm_overrides(settings: Settings) -> dict[str, StructuredLLM]:
+    """Per-role LLM overrides (latency candidate): e.g. ``REVIEWER_MODEL``
+    routes only the reviewer's calls to a cheaper/faster checkpoint.
+    Offline (stub) mode yields no overrides — the stub is already free.
+    """
+    if settings.openai_api_key is None:
+        return {}
+    overrides: dict[str, StructuredLLM] = {}
+    if settings.reviewer_model:
+        overrides["reviewer"] = OpenAIStructuredLLM(
+            settings, model=settings.reviewer_model
+        )
+    return overrides
 
 
 def build_judge_llm(settings: Settings) -> StructuredLLM:

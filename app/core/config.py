@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # LLM
     openai_api_key: SecretStr | None = None
     chat_model_name: str = "gpt-4o-mini"
+    # Optional cheaper/faster model for the Reviewer role; None = same as
+    # chat_model_name. Latency candidate (Phase 8).
+    reviewer_model: str | None = None
+    # Cap output tokens per structured call; None = provider default.
+    llm_max_tokens: int | None = Field(default=None, ge=1)
     # LLM-as-judge: deliberately defaults to a *different* model family than
     # the generator so the evaluator isn't the same checkpoint grading itself.
     judge_model: str = "gpt-4o"
@@ -56,6 +61,20 @@ class Settings(BaseSettings):
     # Bounds total in-flight fetches when callers scrape many URLs in
     # parallel; per-domain politeness still applies on top.
     scrape_max_concurrency: int = Field(default=5, ge=1, le=20)
+
+    # Latency candidates (measured — see docs/eval for the bench harness):
+    # only scrape the top-K ranked unique sources per research pass.
+    research_scrape_top_k: int = Field(default=8, ge=1, le=50)
+    # When the reviewer scores >= this *and* every citation verified, exit
+    # the debate early instead of spending another writer round; None off.
+    review_early_exit_score: float | None = Field(default=4.5, ge=1.0, le=5.0)
+    # Skip the reviewer LLM call entirely when deterministic citation
+    # verification already fails below the support threshold.
+    reviewer_citation_shortcircuit: bool = True
+
+    # Search/scrape fetch cache (SQLite, keyed workspace_id x key x UTC day)
+    cache_enabled: bool = True
+    cache_ttl_hours: float = Field(default=24.0, gt=0.0)
 
     # Orchestration bounds
     max_debate_rounds: int = Field(default=3, ge=0, le=10)

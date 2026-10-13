@@ -55,6 +55,17 @@ LLM_CALLS_TOTAL = Counter(
     "LLM calls by agent role and prompt version",
     ["role", "prompt_version"],
 )
+NODE_SECONDS = Histogram(
+    "orchestrator_node_seconds",
+    "Wall-clock seconds per graph node execution",
+    ["node"],
+    buckets=(0.05, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120),
+)
+CACHE_HITS_TOTAL = Counter(
+    "orchestrator_cache_hits_total",
+    "Search/scrape cache hits and misses, by kind and outcome",
+    ["kind", "outcome"],
+)
 
 
 def instrument_app(app: Starlette) -> None:
