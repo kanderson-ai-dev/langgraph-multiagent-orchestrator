@@ -167,6 +167,6 @@ def test_verify_citations_helper() -> None:
             Citation(claim="c2", quote="not in source at all", source_url="https://nowhere.test"),
         ],
     )
-    kept, dropped = verify_citations(draft, _evidence())
+    kept, dropped, _h = verify_citations(draft, _evidence())
     assert len(kept) == 1
     assert dropped == 1

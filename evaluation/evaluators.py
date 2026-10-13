@@ -17,7 +17,7 @@ def citation_support(state: OrchestrationState) -> float:
     drafts: list[ReportDraft] = state.get("drafts", [])
     if not drafts:
         return 0.0
-    kept, dropped = verify_citations(drafts[-1], state.get("evidence", []))
+    kept, dropped, _h = verify_citations(drafts[-1], state.get("evidence", []))
     return support_rate(len(kept), len(drafts[-1].citations))
 
 

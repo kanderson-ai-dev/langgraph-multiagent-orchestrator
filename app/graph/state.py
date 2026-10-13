@@ -5,7 +5,7 @@ graph; the Pydantic models are the typed payload carried inside it.
 """
 
 from datetime import UTC, datetime
-from typing import Annotated, Literal, TypedDict, TypeVar
+from typing import Annotated, Any, Literal, TypedDict, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -74,6 +74,10 @@ class EvidenceItem(BaseModel):
     text: str = ""
     fetched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     query: str = ""
+    # Content addressing (Phase 6): sha256 of url|content_type|sanitized
+    # text, computed at gather time. Empty for pre-seal legacy items.
+    sha256: str = ""
+    content_type: str = ""
 
 
 class Citation(BaseModel):
@@ -153,5 +157,9 @@ class OrchestrationState(TypedDict, total=False):
     budget_usd: float | None  # hard LLM-spend cap; None = unlimited
     escalation_reason: str | None  # "debate_rounds" | "budget"
     audit_root: str | None
+    # Evidence sealing (Phase 6): manifest over gathered sources, sealed
+    # into the audit chain before the writer runs.
+    evidence_manifest: dict[str, Any] | None
+    evidence_root: str | None
     # Prompt provenance: prompt name → version used by each LLM call site.
     prompt_versions: Annotated[dict[str, int], merge_dicts]

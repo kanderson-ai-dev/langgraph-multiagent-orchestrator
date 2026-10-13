@@ -79,13 +79,19 @@ class ResearcherWorker:
         if not doc.text:
             return None
         # Untrusted content is sanitized before it can ever reach a prompt.
-        sanitized = sanitize_untrusted(doc.text)
+        sanitized = sanitize_untrusted(doc.text)[:_MAX_EVIDENCE_CHARS]
+        # Content-addressed at gather time — the sealed manifest later
+        # proves this exact text is what the writer cited.
+        from app.graph.evidence import evidence_sha
+
         return EvidenceItem(
             evidence_id=str(uuid.uuid4()),
             url=str(page.url),
             title=doc.title,
-            text=sanitized[:_MAX_EVIDENCE_CHARS],
+            text=sanitized,
             query=query,
+            sha256=evidence_sha(str(page.url), page.content_type, sanitized),
+            content_type=page.content_type,
         )
 
     async def run(self, state: dict[str, Any]) -> StateUpdate:

@@ -277,6 +277,26 @@ def build_graph(
             }
         if target in registry:
             update["dispatches"] = state.get("dispatches", 0) + 1
+        # Evidence sealing: before the Writer (or the report assembler /
+        # human review) consumes the evidence, freeze its manifest into the
+        # audit chain. A changed evidence set re-seals with a new root.
+        if target in ("writer", "report_assembler", "human_review"):
+            from app.graph.evidence import build_evidence_manifest
+
+            manifest = build_evidence_manifest(state.get("evidence", []))
+            update["evidence_manifest"] = manifest
+            if manifest["root"] != state.get("evidence_root"):
+                update["evidence_root"] = manifest["root"]
+                update["transcript"].append(
+                    AgentMessage(
+                        sender="supervisor", recipient=target,
+                        kind="system",
+                        content=(
+                            f"Evidence sealed: {manifest['count']} sources, "
+                            f"manifest root {manifest['root'][:12]}…"
+                        ),
+                    )
+                )
         if target == "human_review":
             # Persist the escalation *before* the interrupt so the checkpoint
             # already reflects awaiting_review when the graph pauses.

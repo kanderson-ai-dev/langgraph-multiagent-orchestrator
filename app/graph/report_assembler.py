@@ -18,11 +18,12 @@ def assemble_report(state: dict[str, Any]) -> str | None:
         return None
     draft = drafts[-1]
     evidence = state.get("evidence", [])
-    kept, _dropped = verify_citations(draft, evidence)
+    kept, _dropped, hashes = verify_citations(draft, evidence)
 
     parts = [f"# {draft.title}", "", draft.markdown.strip()]
     if kept:
         parts += ["", "## Sources", ""]
-        for c in kept:
-            parts.append(f"- {c.claim} — {c.source_url}")
+        for c, h in zip(kept, hashes, strict=True):
+            short = f" `#{h[:12]}`" if h else ""
+            parts.append(f"- {c.claim} — {c.source_url}{short}")
     return "\n".join(parts).strip() + "\n"

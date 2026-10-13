@@ -139,7 +139,7 @@ async def run_baseline_case(
             for c in out.citations
         ],
     )
-    kept, _dropped = verify_citations(draft, evidence)
+    kept, _dropped, _h = verify_citations(draft, evidence)
     return {
         "case_id": case_id,
         "citation_support": support_rate(len(kept), len(draft.citations)),

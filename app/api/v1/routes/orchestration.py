@@ -244,4 +244,33 @@ async def audit_trail(
         "audit_root": stored_root,
         "valid": verify_chain(messages, stored_root),
         "entries": [e.model_dump() for e in entries],
+        "evidence_root": job.result.get("evidence_root"),
+        "evidence_manifest": job.result.get("evidence_manifest"),
+    }
+
+
+@router.get("/reports/{job_id}/evidence", response_model=dict[str, Any])
+async def evidence(
+    job_id: str,
+    request: Request,
+    ctx: RequestContext = Depends(get_context),
+) -> dict[str, Any]:
+    """List the job's sealed evidence sources with their content hashes.
+
+    The manifest is sealed into the audit chain before the writer runs —
+    this endpoint exposes the same sealed view the report's citation
+    footnotes reference by short hash.
+    """
+    job = await _jobs(request).get(ctx.workspace_id, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    result = job.result or {}
+    manifest = result.get("evidence_manifest")
+    if not isinstance(manifest, dict):
+        raise HTTPException(status_code=409, detail="evidence not sealed yet")
+    return {
+        "job_id": job.job_id,
+        "evidence_root": result.get("evidence_root"),
+        "count": manifest.get("count", 0),
+        "items": manifest.get("items", []),
     }

@@ -53,20 +53,29 @@ class ReviewOutput(BaseModel):
 
 def verify_citations(
     draft: ReportDraft, evidence: list[EvidenceItem]
-) -> tuple[list[Citation], int]:
-    """Split citations into (supported, unsupported-count) against evidence."""
-    by_url = {e.url: e.text for e in evidence}
+) -> tuple[list[Citation], int, list[str | None]]:
+    """Split citations into (supported, dropped-count, source-hash) tuples.
+
+    ``kept`` and ``source_hashes`` are aligned: each supported citation
+    records the ``sha256`` of the evidence item that verified it (None
+    when the fallback pooled-text path matched or the item predates
+    sealing).
+    """
+    by_url = {e.url: e for e in evidence}
     kept: list[Citation] = []
+    source_hashes: list[str | None] = []
     dropped = 0
     for c in draft.citations:
-        text = by_url.get(c.source_url, "")
+        item = by_url.get(c.source_url)
+        text = item.text if item else ""
         if not text:  # URL unknown — check across all evidence as fallback
             text = "\n".join(e.text for e in evidence)
         if citation_supported(c.quote, text):
             kept.append(c)
+            source_hashes.append(item.sha256 if item else None)
         else:
             dropped += 1
-    return kept, dropped
+    return kept, dropped, source_hashes
 
 
 class ReviewerWorker:
@@ -117,7 +126,7 @@ class ReviewerWorker:
             }
 
         draft = drafts[-1]
-        kept, dropped = verify_citations(draft, evidence)
+        kept, dropped, _hashes = verify_citations(draft, evidence)
         DEBATE_ROUNDS_TOTAL.inc()
 
         from app.core.cost_tracking import tracked_structured
