@@ -133,6 +133,9 @@ def test_fund_and_continue_alias_completes(api_client: Any) -> None:
     assert job["result"]["escalation_reason"] == "debate_rounds"
     assert job["result"]["has_draft"] is True
     assert "approve" in job["result"]["allowed_actions"]
+    # Regression: the second pause must publish a *fresh* guided set — the
+    # previous budget pause's fund actions must not leak into it.
+    assert "fund" not in job["result"]["allowed_actions"]
 
     api_client.post(
         f"/api/v1/orchestration/reports/{job_id}/review",

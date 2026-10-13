@@ -110,6 +110,9 @@ def _version_json(pv: Any) -> dict[str, Any]:
         "changelog": pv.changelog,
         "sha256": pv.sha256,
         "source": pv.source,
+        # The console's candidate editor prefills from the promoted
+        # template — prompts are inspectable artifacts by design (viewer+).
+        "template": pv.template,
     }
 
 

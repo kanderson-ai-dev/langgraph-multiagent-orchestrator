@@ -92,17 +92,34 @@ def main() -> None:
             if status in ("done", "failed", "blocked"):
                 break
             if status == "awaiting_review":
-                # The modal opens via SSE on each escalation; the fund button
-                # is only rendered for budget escalations — that's the
-                # DOM-truthful signal for which action to take.
+                # The modal opens via SSE on each escalation. The server
+                # advertises a guided ``allowed_actions`` set per pause — the
+                # buttons outside it carry ``.hidden`` — so pick the first
+                # *visible* action instead of assuming a fixed one.
                 if page.locator("#hitl-modal").is_visible():
                     shot(page, "hitl", 2)
+                    try:
+                        page.wait_for_selector(
+                            "#hitl-modal [data-action]:not([disabled])"
+                            ":not(.hidden)",
+                            timeout=10000)
+                    except Exception:
+                        shot(page, "run")
+                        continue
                     if page.locator('[data-action="fund"]').is_visible():
                         page.fill("#hitl-fund", "0.05")
                         shot(page, "hitl")
                         page.click('[data-action="fund"]')
-                    else:
+                    elif page.locator('[data-action="approve"]').is_visible():
                         page.click('[data-action="approve"]')
+                    elif page.locator('[data-action="edit"]').is_visible():
+                        page.fill(
+                            "#hitl-feedback",
+                            "Tighten the executive summary and re-cite.")
+                        page.click('[data-action="edit"]')
+                    else:
+                        page.fill("#hitl-feedback", "Rejected for the demo.")
+                        page.click('[data-action="reject"]')
                 else:
                     shot(page, "run")
                     time.sleep(0.5)

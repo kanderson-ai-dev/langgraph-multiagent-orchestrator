@@ -15,6 +15,7 @@ import socket
 import threading
 import time
 import urllib.request
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -38,6 +39,10 @@ except ImportError:  # pragma: no cover - environment-dependent
 @pytest.fixture()
 def live_server(tmp_path: Any) -> Any:
     """Serve the stubbed app on an ephemeral port for a real browser."""
+    from app.api.v1.routes.prompts import get_prompt_evaluator
+    from app.services.prompt_eval import ABResult
+    from app.services.prompt_registry import PromptRegistry
+
     settings = Settings(
         _env_file=None, scrape_delay_seconds=0.0, scrape_respect_robots=False
     )
@@ -52,6 +57,27 @@ def live_server(tmp_path: Any) -> Any:
     app.state.runner = runner
     app.state.job_store = runner.job_store
     app.state.usage_store = runner.usage_store
+    app.state.prompt_registry = PromptRegistry.load(db_path=":memory:")
+
+    # Deterministic A/B evaluator: the candidate always regresses vs the
+    # promoted version — the metric gate must block promote until an
+    # override reason is supplied (mirrors the unit-suite fixture).
+    clean = {"citation_support_rate": 1.0, "rubric_score_avg": 4.5,
+             "debate_convergence_rate": 1.0, "blocked_rate": 1.0}
+    regressed = {**clean, "rubric_score_avg": 3.0,
+                 "debate_convergence_rate": 0.5}
+
+    async def evaluator(name: str, version: int) -> ABResult:
+        return ABResult(
+            name=name,
+            promoted_version=max(version - 1, 1),
+            candidate_version=version,
+            promoted_metrics=clean,
+            candidate_metrics=regressed,
+            deltas={k: round(regressed[k] - clean[k], 6) for k in clean},
+        )
+
+    app.dependency_overrides[get_prompt_evaluator] = lambda: evaluator
 
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
@@ -76,26 +102,31 @@ def live_server(tmp_path: Any) -> Any:
             time.sleep(0.1)
     else:
         pytest.fail("live server did not start")
-    yield f"http://127.0.0.1:{port}"
+    yield SimpleNamespace(url=f"http://127.0.0.1:{port}", db=db, app=app)
     server.should_exit = True
     thread.join(timeout=10)
 
 
-def test_console_full_flow(live_server: str) -> None:
+def _browser(p: Any) -> Any:
+    """Chromium via local Chrome first, bundled binary as fallback."""
+    try:
+        return p.chromium.launch(channel="chrome", headless=True)
+    except Exception:
+        return p.chromium.launch(headless=True)
+
+
+def test_console_full_flow(live_server: Any) -> None:
     """Submit → live transcript → rendered report → real source links."""
     if sync_playwright is None:
         pytest.skip("playwright not installed")
     with sync_playwright() as p:
         try:
-            browser = p.chromium.launch(channel="chrome", headless=True)
-        except Exception:
-            try:
-                browser = p.chromium.launch(headless=True)
-            except Exception as exc:
-                pytest.skip(f"no browser binary available: {exc}")
+            browser = _browser(p)
+        except Exception as exc:
+            pytest.skip(f"no browser binary available: {exc}")
         try:
             page = browser.new_page(viewport={"width": 1366, "height": 860})
-            page.goto(live_server + "/console/")
+            page.goto(live_server.url + "/console/")
             page.fill('#job-form [name="topic"]', "SOC 2 vendor landscape")
             page.click("#submit-btn")
 
@@ -113,5 +144,201 @@ def test_console_full_flow(live_server: str) -> None:
             page.wait_for_selector("#audit-badge:not(.hidden)", timeout=15000)
             assert "audit" in page.inner_text("#audit-badge")
             assert page.locator("#report-pdf").is_visible()
+            # Prompt-version chips + sealed evidence hashes render in the
+            # report card (stub graph produces both).
+            page.wait_for_selector("#prompt-versions .chip-prompt",
+                                   timeout=15000)
+            page.wait_for_selector("#evidence-strip .chip-evidence",
+                                   timeout=15000)
+        finally:
+            browser.close()
+
+
+def test_prompt_registry_tab_flow(live_server: Any) -> None:
+    """Candidate → gated promote blocked → override → rollback, all in UI."""
+    if sync_playwright is None:
+        pytest.skip("playwright not installed")
+    with sync_playwright() as p:
+        try:
+            browser = _browser(p)
+        except Exception as exc:
+            pytest.skip(f"no browser binary available: {exc}")
+        try:
+            page = browser.new_page(viewport={"width": 1366, "height": 900})
+            page.goto(live_server.url + "/console/")
+            page.click('[data-tab="prompts"]')
+
+            # Registry lists seeds; select writer → template prefilled.
+            page.wait_for_selector('.prompt-name[data-name="writer"]',
+                                   timeout=15000)
+            page.click('.prompt-name[data-name="writer"]')
+            page.wait_for_selector("#versions-body tr", timeout=15000)
+            assert page.input_value("#candidate-template") != ""
+
+            # Register a candidate (writer declares no variables — a
+            # template without placeholders keeps the contract).
+            page.fill("#candidate-template",
+                      "Writer v2 — draft even more carefully.")
+            page.fill("#candidate-changelog", "e2e candidate")
+            page.click("#candidate-submit")
+            page.wait_for_function(
+                "document.querySelectorAll('#versions-body tr').length > 1",
+                timeout=15000)
+
+            # Promote v2 → metric gate blocks (regressing evaluator).
+            page.fill("#promote-version", "2")
+            page.click("#promote-run")
+            page.wait_for_selector("#promote-result .modal-error",
+                                   timeout=30000)
+            page.wait_for_selector("#override-box:not(.hidden)",
+                                   timeout=15000)
+
+            # Override with a real reason → promote succeeds.
+            page.fill("#override-reason",
+                      "e2e: measured regression accepted for QA demo")
+            page.click("#promote-override-run")
+            page.wait_for_selector("#promote-result .ok-text",
+                                   timeout=30000)
+
+            # Roll back to v1.
+            page.fill("#rollback-version", "1")
+            page.fill("#rollback-reason", "e2e rollback")
+            page.click("#rollback-run")
+            page.wait_for_selector("#promote-result .ok-text",
+                                   timeout=30000)
+        finally:
+            browser.close()
+
+
+def test_performance_and_audit_tabs(live_server: Any) -> None:
+    """Performance empty→populated states; audit verify + tamper flag."""
+    if sync_playwright is None:
+        pytest.skip("playwright not installed")
+    # Seed one completed job + usage row so the populated state is real.
+    import asyncio
+    import threading
+
+    async def seed() -> str:
+        from app.graph.state import AgentMessage, Brief
+        from app.services.audit import audit_root, chain_transcript
+
+        jobs = live_server.app.state.job_store
+        usage = live_server.app.state.usage_store
+        brief = Brief.model_validate(
+            {"topic": "seeded report", "report_type": "general",
+             "budget_usd": 1.0}
+        )
+        job = await jobs.create("default", brief)
+        transcript = [
+            AgentMessage(sender="writer", recipient="reviewer",
+                         kind="feedback", content="draft v1"),
+            AgentMessage(sender="reviewer", recipient="supervisor",
+                         kind="verdict", content="approve"),
+        ]
+        await jobs.set_result(
+            "default", job.job_id,
+            {
+                "report": "done",
+                "debate_rounds": 1,
+                "transcript": [m.model_dump(mode="json") for m in transcript],
+                "audit_root": audit_root(transcript),
+                "audit_entries": [
+                    e.model_dump() for e in chain_transcript(transcript)
+                ],
+            },
+            cost_usd=0.002, status="done",
+        )
+        await usage.record(
+            job_id=job.job_id, workspace_id="default", role="writer",
+            model="gpt-4o-mini", prompt_tokens=10, completion_tokens=5,
+            cost_usd=0.002, prompt_name="writer", prompt_version=1,
+        )
+        return job.job_id
+
+    def run_seed() -> str:
+        # playwright's sync API owns the main thread's loop — run the
+        # async seed in a worker thread with its own loop.
+        box: list[str] = []
+
+        def _go() -> None:
+            box.append(asyncio.run(seed()))
+
+        t = threading.Thread(target=_go)
+        t.start()
+        t.join()
+        return box[0]
+
+    with sync_playwright() as p:
+        try:
+            browser = _browser(p)
+        except Exception as exc:
+            pytest.skip(f"no browser binary available: {exc}")
+        try:
+            page = browser.new_page(viewport={"width": 1366, "height": 900})
+            page.goto(live_server.url + "/console/")
+
+            # Performance tab — empty state first (no completed jobs yet).
+            page.click('[data-tab="performance"]')
+            page.wait_for_selector("#perf-body .empty-note", timeout=15000)
+            assert "no completed jobs" in page.inner_text("#perf-body").lower()
+
+            job_id = run_seed()
+            page.reload()
+            page.click('[data-tab="performance"]')
+            page.wait_for_selector("#perf-body .perf-section", timeout=15000)
+            # inner_text applies text-transform — labels render uppercase.
+            assert "SUCCESS RATE" in page.inner_text("#perf-body")
+            assert "HUMAN VS AGENT" in page.inner_text("#perf-body")
+
+            # Audit tab — select the seeded job and verify.
+            page.click('[data-tab="audit"]')
+            page.select_option("#audit-job-select", job_id)
+            page.click("#audit-verify")
+            page.wait_for_selector("#audit-verify-badge.chip-ok",
+                                   timeout=15000)
+            assert "valid" in page.inner_text("#audit-verify-badge")
+
+            # Tamper the stored transcript → re-verify flips to INVALID.
+            # (sync sqlite3 — playwright's sync API owns the event loop)
+            import sqlite3
+            with sqlite3.connect(live_server.db) as db:
+                db.execute(
+                    "UPDATE jobs SET result_json ="
+                    " json_replace(result_json,"
+                    " '$.transcript[0].content', 'tampered')"
+                    " WHERE job_id = ?",
+                    (job_id,),
+                )
+                db.commit()
+            page.click("#audit-verify")
+            page.wait_for_selector("#audit-verify-badge.chip-bad",
+                                   timeout=15000)
+            assert "INVALID" in page.inner_text("#audit-verify-badge")
+        finally:
+            browser.close()
+
+
+def test_console_responsive(live_server: Any) -> None:
+    """375/768/1280 px: no horizontal overflow, all four tabs reachable."""
+    if sync_playwright is None:
+        pytest.skip("playwright not installed")
+    with sync_playwright() as p:
+        try:
+            browser = _browser(p)
+        except Exception as exc:
+            pytest.skip(f"no browser binary available: {exc}")
+        try:
+            for width in (375, 768, 1280):
+                page = browser.new_page(
+                    viewport={"width": width, "height": 800}
+                )
+                page.goto(live_server.url + "/console/")
+                for tab in ("jobs", "prompts", "performance", "audit"):
+                    page.click(f'[data-tab="{tab}"]')
+                    page.wait_for_function(
+                        "document.documentElement.scrollWidth"
+                        " <= document.documentElement.clientWidth + 1",
+                        timeout=10000)
+                page.close()
         finally:
             browser.close()

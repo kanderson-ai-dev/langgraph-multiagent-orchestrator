@@ -15,6 +15,7 @@ Outputs land in ``docs/screenshots/`` under the names the README embeds.
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 import sys
 import tempfile
@@ -73,6 +74,41 @@ def main() -> None:
         page.wait_for_timeout(800)
         page.screenshot(path=str(OUT / "swagger-docs.png"))
         print("captured swagger-docs.png")
+
+        # 3. Prompt Registry tab — version statuses + lifecycle controls
+        page.goto(f"{BASE}/console/", wait_until="networkidle")
+        page.click('[data-tab="prompts"]')
+        page.wait_for_selector("#versions-body tr", timeout=15000)
+        page.wait_for_timeout(400)
+        page.screenshot(path=str(OUT / "console-prompt-registry.png"))
+        print("captured console-prompt-registry.png")
+
+        # 4. Performance & Cost tab — real measured aggregates
+        page.click('[data-tab="performance"]')
+        page.wait_for_selector("#perf-body .perf-section", timeout=15000)
+        page.wait_for_timeout(400)
+        page.screenshot(path=str(OUT / "console-performance.png"))
+        print("captured console-performance.png")
+
+        # 5. Audit tab — verify the newest job's chain before shooting
+        page.click('[data-tab="audit"]')
+        page.wait_for_selector(
+            "#audit-job-select option[value]", state="attached", timeout=15000
+        )
+        first_job = page.eval_on_selector(
+            "#audit-job-select",
+            "s => [...s.options].find(o => o.value)?.value",
+        )
+        if first_job:
+            page.select_option("#audit-job-select", first_job)
+            page.click("#audit-verify")
+            with contextlib.suppress(Exception):
+                page.wait_for_selector(
+                    "#audit-verify-badge:not(.hidden)", timeout=15000
+                )
+        page.wait_for_timeout(400)
+        page.screenshot(path=str(OUT / "console-audit.png"))
+        print("captured console-audit.png")
 
         page.context.browser.close()
 

@@ -93,43 +93,149 @@
 
     <!-- Main -->
     <main class="main">
-      <div id="empty" class="empty">
-        <p class="empty-title">No job selected</p>
-        <p class="empty-sub">Submit a brief on the left, or open <code>?job=&lt;id&gt;</code>.</p>
+      <nav class="tabs" role="tablist" aria-label="Console views">
+        <button type="button" role="tab" id="tabbtn-jobs" data-tab="jobs" aria-selected="true" aria-controls="tab-jobs" class="tab active">Jobs</button>
+        <button type="button" role="tab" id="tabbtn-prompts" data-tab="prompts" aria-selected="false" aria-controls="tab-prompts" class="tab">Prompt Registry</button>
+        <button type="button" role="tab" id="tabbtn-performance" data-tab="performance" aria-selected="false" aria-controls="tab-performance" class="tab">Performance &amp; Cost</button>
+        <button type="button" role="tab" id="tabbtn-audit" data-tab="audit" aria-selected="false" aria-controls="tab-audit" class="tab">Audit</button>
+      </nav>
+
+      <div id="tab-jobs" role="tabpanel" aria-labelledby="tabbtn-jobs">
+        <div id="empty" class="empty">
+          <p class="empty-title">No job selected</p>
+          <p class="empty-sub">Submit a brief on the left, or open <code>?job=&lt;id&gt;</code>.</p>
+        </div>
+
+        <section id="job-view" class="hidden">
+          <div class="job-head card">
+            <div>
+              <p class="job-id font-mono" id="job-id"></p>
+              <p class="job-topic" id="job-topic"></p>
+              <p class="job-meta" id="job-meta"></p>
+              <div class="job-team" id="job-team"></div>
+            </div>
+            <div class="job-head-right">
+              <button id="review-btn" class="btn btn-primary hidden">Review required</button>
+              <span id="job-status" class="status"></span>
+              <span id="job-cost" class="chip chip-mono"></span>
+              <a id="pdf-link" class="btn btn-ghost hidden" href="#" target="_blank" rel="noopener">PDF ↓</a>
+            </div>
+          </div>
+
+          <div class="columns">
+            <section class="card feed-card">
+              <h2 class="card-title">Live transcript</h2>
+              <ol id="feed" class="feed" aria-live="polite"></ol>
+            </section>
+
+            <section class="card report-card hidden" id="report-card">
+              <div class="report-head">
+                <h2 class="card-title">Final report</h2>
+                <a id="report-pdf" class="btn btn-primary hidden" href="#" target="_blank" rel="noopener">Download PDF ↓</a>
+              </div>
+              <div id="prompt-versions" class="chip-row hidden" aria-label="Prompt versions used"></div>
+              <div id="evidence-strip" class="chip-row hidden" aria-label="Sealed evidence hashes"></div>
+              <div id="audit-badge" class="chip chip-mono hidden"></div>
+              <article id="report" class="report"></article>
+            </section>
+          </div>
+        </section>
       </div>
 
-      <section id="job-view" class="hidden">
-        <div class="job-head card">
-          <div>
-            <p class="job-id font-mono" id="job-id"></p>
-            <p class="job-topic" id="job-topic"></p>
-            <p class="job-meta" id="job-meta"></p>
-            <div class="job-team" id="job-team"></div>
-          </div>
-          <div class="job-head-right">
-            <button id="review-btn" class="btn btn-primary hidden">Review required</button>
-            <span id="job-status" class="status"></span>
-            <span id="job-cost" class="chip chip-mono"></span>
-            <a id="pdf-link" class="btn btn-ghost hidden" href="#" target="_blank" rel="noopener">PDF ↓</a>
-          </div>
-        </div>
-
-        <div class="columns">
-          <section class="card feed-card">
-            <h2 class="card-title">Live transcript</h2>
-            <ol id="feed" class="feed"></ol>
-          </section>
-
-          <section class="card report-card hidden" id="report-card">
-            <div class="report-head">
-              <h2 class="card-title">Final report</h2>
-              <a id="report-pdf" class="btn btn-primary hidden" href="#" target="_blank" rel="noopener">Download PDF ↓</a>
+      <div id="tab-prompts" role="tabpanel" aria-labelledby="tabbtn-prompts" class="hidden">
+        <div class="prompts-layout">
+          <section class="card prompts-list-card">
+            <div class="card-head">
+              <h2 class="card-title">Prompts</h2>
+              <button id="prompts-refresh" class="btn btn-ghost">Refresh</button>
             </div>
-            <div id="audit-badge" class="chip chip-mono hidden"></div>
-            <article id="report" class="report"></article>
+            <div id="prompt-names" class="prompt-names" role="listbox" aria-label="Prompt names"></div>
+            <table class="perf-table versions-table" aria-label="Versions">
+              <thead><tr><th>Ver</th><th>Status</th><th>Changelog</th><th>SHA</th></tr></thead>
+              <tbody id="versions-body"></tbody>
+            </table>
+          </section>
+
+          <section class="card">
+            <h2 class="card-title">Diff</h2>
+            <div class="field-row">
+              <label class="field"><span>From</span><input id="diff-from" type="number" min="1" /></label>
+              <label class="field"><span>To</span><input id="diff-to" type="number" min="1" /></label>
+              <button id="diff-run" class="btn btn-ghost">Diff</button>
+            </div>
+            <div id="diff-result"></div>
+          </section>
+
+          <section class="card">
+            <h2 class="card-title">Candidate <span id="promote-status" class="chip chip-mono"></span></h2>
+            <label class="field">
+              <span>Template (prefilled from selection)</span>
+              <textarea id="candidate-template" rows="8" aria-label="Candidate template"></textarea>
+            </label>
+            <label class="field">
+              <span>Changelog</span>
+              <input id="candidate-changelog" placeholder="what changed and why" />
+            </label>
+            <button id="candidate-submit" class="btn btn-primary">Register candidate</button>
+          </section>
+
+          <section class="card">
+            <h2 class="card-title">A/B evaluation</h2>
+            <div class="field-row">
+              <label class="field"><span>Version (blank = latest candidate)</span><input id="ab-version" type="number" min="1" /></label>
+              <button id="ab-run" class="btn btn-ghost">Run A/B</button>
+            </div>
+            <div id="ab-result"></div>
+          </section>
+
+          <section class="card">
+            <h2 class="card-title">Promote / rollback</h2>
+            <div class="field-row">
+              <label class="field"><span>Promote version</span><input id="promote-version" type="number" min="1" /></label>
+              <button id="promote-run" class="btn btn-primary">Promote</button>
+            </div>
+            <div id="override-box" class="hidden">
+              <label class="field">
+                <span>Override reason (≥ 20 chars — audited)</span>
+                <input id="override-reason" />
+              </label>
+              <button id="promote-override-run" class="btn btn-danger">Promote with override</button>
+            </div>
+            <div class="field-row" style="margin-top:12px">
+              <label class="field"><span>Rollback to</span><input id="rollback-version" type="number" min="1" /></label>
+              <label class="field"><span>Reason</span><input id="rollback-reason" /></label>
+              <button id="rollback-run" class="btn btn-ghost">Rollback</button>
+            </div>
+            <div id="promote-result"></div>
           </section>
         </div>
-      </section>
+      </div>
+
+      <div id="tab-performance" role="tabpanel" aria-labelledby="tabbtn-performance" class="hidden">
+        <div class="card-head">
+          <h2 class="card-title">Workspace performance</h2>
+          <button id="perf-refresh" class="btn btn-ghost">Refresh</button>
+        </div>
+        <div id="perf-body" class="perf-body"></div>
+      </div>
+
+      <div id="tab-audit" role="tabpanel" aria-labelledby="tabbtn-audit" class="hidden">
+        <section class="card">
+          <div class="card-head">
+            <h2 class="card-title">Audit trail verification</h2>
+            <button id="audit-refresh" class="btn btn-ghost">Reload jobs</button>
+          </div>
+          <div class="field-row">
+            <label class="field" style="flex:1">
+              <span>Job</span>
+              <select id="audit-job-select" aria-label="Job to verify"></select>
+            </label>
+            <button id="audit-verify" class="btn btn-primary">Verify chain</button>
+            <span id="audit-verify-badge" class="chip chip-mono"></span>
+          </div>
+          <div id="audit-body"></div>
+        </section>
+      </div>
     </main>
   </div>
 
@@ -160,6 +266,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=3"></script>
+  <script type="module" src="app.js?v=4"></script>
 </body>
 </html>

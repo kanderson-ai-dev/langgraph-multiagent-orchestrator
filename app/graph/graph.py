@@ -394,8 +394,10 @@ def build_graph(
                 "debate_round": state.get("debate_round", 0),
                 "latest_verdict": verdict.model_dump() if verdict else None,
                 "has_draft": has_draft,
-                "allowed_actions": state.get("allowed_actions")
-                or allowed_actions(reason, has_draft),
+                # Always recompute for *this* pause — a stale set from an
+                # earlier escalation would offer actions the current reason
+                # doesn't support (e.g. "fund" on a debate_rounds pause).
+                "allowed_actions": allowed_actions(reason, has_draft),
             }
         )
         from app.core.metrics import HUMAN_REVIEW_TOTAL
