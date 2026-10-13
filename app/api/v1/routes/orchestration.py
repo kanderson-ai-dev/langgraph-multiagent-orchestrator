@@ -13,7 +13,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import Settings, get_settings
-from app.core.dependencies import RequestContext, get_context, get_rate_limiter
+from app.core.dependencies import RequestContext, get_rate_limiter, require_role
 from app.core.rate_limit import RateLimiter
 from app.graph.state import Brief
 from app.services.job_runner import JobRunner
@@ -68,7 +68,7 @@ async def submit(
     body: SubmitRequest,
     request: Request,
     response: Response,
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("member")),
     settings: Settings = Depends(get_settings),
     limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> JobResponse:
@@ -96,7 +96,7 @@ async def submit(
 async def list_jobs(
     request: Request,
     limit: int = 20,
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("viewer")),
 ) -> list[dict[str, Any]]:
     """Recent jobs for this workspace, newest first (lightweight summaries)."""
     jobs = await _jobs(request).list(ctx.workspace_id, limit=min(limit, 100))
@@ -118,7 +118,7 @@ async def list_jobs(
 async def poll(
     job_id: str,
     request: Request,
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("viewer")),
 ) -> dict[str, Any]:
     job = await _jobs(request).get(ctx.workspace_id, job_id)
     if job is None:
@@ -141,7 +141,7 @@ async def poll(
 async def stream(
     job_id: str,
     request: Request,
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("viewer")),
 ) -> StreamingResponse:
     job = await _jobs(request).get(ctx.workspace_id, job_id)
     if job is None:
@@ -159,7 +159,7 @@ async def review(
     job_id: str,
     body: ReviewRequest,
     request: Request,
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("member")),
 ) -> dict[str, str]:
     from app.graph.hitl import ALL_ACTIONS, approve_hint
 
@@ -214,7 +214,7 @@ async def review(
 async def report_pdf(
     job_id: str,
     request: Request,
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("viewer")),
 ) -> Response:
     job = await _jobs(request).get(ctx.workspace_id, job_id)
     if job is None:
@@ -245,7 +245,7 @@ async def report_pdf(
 async def audit_trail(
     job_id: str,
     request: Request,
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("viewer")),
 ) -> dict[str, Any]:
     """Return the hash-chained audit trail and re-verify it on the fly.
 
@@ -281,7 +281,7 @@ async def audit_trail(
 async def evidence(
     job_id: str,
     request: Request,
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("viewer")),
 ) -> dict[str, Any]:
     """List the job's sealed evidence sources with their content hashes.
 

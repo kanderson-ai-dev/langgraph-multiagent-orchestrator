@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
-from app.core.dependencies import RequestContext, get_context
+from app.core.dependencies import RequestContext, require_role
 from app.services.prompt_eval import (
     ABResult,
     EvalCaseLike,
@@ -119,7 +119,7 @@ def _version_json(pv: Any) -> dict[str, Any]:
 @router.get("", response_model=dict[str, Any])
 async def list_prompts(
     registry: PromptRegistry = Depends(get_prompt_registry),
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("viewer")),
 ) -> dict[str, Any]:
     return {
         name: [_version_json(pv) for pv in registry.list_versions(name)]
@@ -130,7 +130,7 @@ async def list_prompts(
 @router.get("/audit", response_model=dict[str, Any])
 async def registry_audit(
     registry: PromptRegistry = Depends(get_prompt_registry),
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("viewer")),
 ) -> dict[str, Any]:
     """Registry lifecycle audit chain — re-verified on every read."""
     try:
@@ -144,7 +144,7 @@ async def registry_audit(
 async def ab_run_status(
     run_id: str,
     request: Request,
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("viewer")),
 ) -> dict[str, Any]:
     runs: dict[str, dict[str, Any]] = getattr(request.app.state, "ab_runs", {})
     run = runs.get(run_id)
@@ -157,7 +157,7 @@ async def ab_run_status(
 async def list_versions(
     name: str,
     registry: PromptRegistry = Depends(get_prompt_registry),
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("viewer")),
 ) -> list[dict[str, Any]]:
     if name not in registry.names():
         raise HTTPException(status_code=404, detail="prompt not found")
@@ -169,7 +169,7 @@ async def diff_versions(
     name: str,
     request: Request,
     registry: PromptRegistry = Depends(get_prompt_registry),
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("viewer")),
 ) -> dict[str, Any]:
     from_v = request.query_params.get("from")
     to_v = request.query_params.get("to")
@@ -201,7 +201,7 @@ async def create_candidate(
     name: str,
     body: CandidateRequest,
     registry: PromptRegistry = Depends(get_prompt_registry),
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("admin")),
 ) -> dict[str, Any]:
     try:
         pv = registry.create_candidate(
@@ -239,7 +239,7 @@ async def ab_test(
     registry: PromptRegistry = Depends(get_prompt_registry),
     evaluator: PromptEvaluator = Depends(get_prompt_evaluator),
     settings: Settings = Depends(get_settings),
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("admin")),
 ) -> dict[str, Any]:
     try:
         registry.get(name)
@@ -303,7 +303,7 @@ async def promote(
     registry: PromptRegistry = Depends(get_prompt_registry),
     evaluator: PromptEvaluator = Depends(get_prompt_evaluator),
     settings: Settings = Depends(get_settings),
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("admin")),
 ) -> dict[str, Any]:
     try:
         registry.get(name)
@@ -356,7 +356,7 @@ async def rollback(
     name: str,
     body: RollbackRequest,
     registry: PromptRegistry = Depends(get_prompt_registry),
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("admin")),
 ) -> dict[str, Any]:
     try:
         pv = registry.rollback(

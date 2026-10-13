@@ -50,8 +50,21 @@ async def login(
         # Generic failure — never distinguish bad user vs bad password.
         raise HTTPException(status_code=401, detail="invalid credentials")
 
+    # Role resolution: an explicit membership wins; the platform admin
+    # bootstraps as workspace admin everywhere else (pre-RBAC implicit
+    # tenants keep working — the migration seals ``default`` formally).
+    role = "admin"
+    store = getattr(request.app.state, "workspace_store", None)
+    if store is not None:
+        member_role = await store.get_member(body.workspace_id, body.username)
+        if member_role is not None:
+            role = member_role
+
     token = issue_token(
-        settings, subject=body.username, workspace_id=body.workspace_id
+        settings,
+        subject=body.username,
+        workspace_id=body.workspace_id,
+        role=role,
     )
     return TokenResponse(
         access_token=token, expires_in=settings.jwt_expire_minutes * 60

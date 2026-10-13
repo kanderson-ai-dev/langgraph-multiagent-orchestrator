@@ -17,6 +17,7 @@ from app.api.v1.routes.dashboard import router as dashboard_router
 from app.api.v1.routes.health import router as health_router
 from app.api.v1.routes.orchestration import router as orchestration_router
 from app.api.v1.routes.prompts import router as prompts_router
+from app.api.v1.routes.workspaces import router as workspaces_router
 from app.core.config import Settings, get_settings
 from app.core.event_bus import build_event_bus
 from app.core.logging import configure_logging, get_logger
@@ -30,6 +31,7 @@ from app.services.scraper_client import ScraperClient
 from app.services.search_client import build_search_client
 from app.services.tracing import init_tracing, shutdown_tracing
 from app.services.usage_store import UsageStore
+from app.services.workspace_store import WorkspaceStore
 
 logger = get_logger(__name__)
 
@@ -113,6 +115,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.usage_store = app.state.runner.usage_store
         if not hasattr(app.state, "prompt_registry"):
             app.state.prompt_registry = app.state.runner.prompt_registry
+        if not hasattr(app.state, "workspace_store"):
+            app.state.workspace_store = WorkspaceStore(settings.database_path)
+        # Idempotent bootstrap: pre-RBAC implicit tenants land in the
+        # ``default`` workspace with the platform admin as its admin member.
+        await app.state.workspace_store.migrate(
+            admin_subject=settings.admin_username
+            if settings.auth_enabled
+            else None
+        )
         registry = getattr(app.state, "prompt_registry", None)
         if registry is not None:
             registry.publish_metrics()
@@ -177,6 +188,7 @@ def create_app() -> FastAPI:
     app.include_router(orchestration_router, prefix=settings.api_prefix)
     app.include_router(dashboard_router, prefix=settings.api_prefix)
     app.include_router(prompts_router, prefix=settings.api_prefix)
+    app.include_router(workspaces_router, prefix=settings.api_prefix)
 
     # Frontend: public landing at `/`, operator console at `/console`.
     frontend = Path(__file__).resolve().parent.parent / "frontend"

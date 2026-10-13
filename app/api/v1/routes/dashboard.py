@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, Request
 
-from app.core.dependencies import RequestContext, get_context
+from app.core.dependencies import RequestContext, require_role
 from app.services.usage_store import UsageStore
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -11,7 +11,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 @router.get("/summary")
 async def summary(
     request: Request,
-    ctx: RequestContext = Depends(get_context),
+    ctx: RequestContext = Depends(require_role("viewer")),
 ) -> dict[str, object]:
     from app.core.latency import LATENCY
 

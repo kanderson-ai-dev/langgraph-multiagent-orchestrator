@@ -16,6 +16,7 @@ class TokenPayload(BaseModel):
     workspace_id: str
     exp: datetime
     iat: datetime
+    role: str = "member"
 
 
 def hash_password(password: str) -> str:
@@ -32,7 +33,11 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def issue_token(
-    settings: Settings, *, subject: str, workspace_id: str = "default"
+    settings: Settings,
+    *,
+    subject: str,
+    workspace_id: str = "default",
+    role: str = "member",
 ) -> str:
     """Issue a short-lived JWT. Requires ``jwt_secret_key`` to be configured."""
     if settings.jwt_secret_key is None:
@@ -44,6 +49,7 @@ def issue_token(
         {
             "sub": subject,
             "workspace_id": workspace_id,
+            "role": role,
             "iat": int(now.timestamp()),
             "exp": int(expires.timestamp()),
         },
