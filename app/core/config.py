@@ -71,6 +71,15 @@ class Settings(BaseSettings):
     langchain_api_key: SecretStr | None = None
     langchain_project: str = "langgraph-multiagent-orchestrator"
 
+    # Tracing provider: langsmith | langfuse | none.
+    # Langfuse is opt-in — active only when BOTH keys are set; a single key
+    # or "none" means a silent no-op so tests stay offline. When langfuse is
+    # the provider, LangSmith export is disabled (no double tracing).
+    tracing_provider: Literal["none", "langsmith", "langfuse"] = "none"
+    langfuse_public_key: SecretStr | None = None
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+
     # Auth (optional — open local dev when unset)
     jwt_secret_key: SecretStr | None = None
     jwt_algorithm: str = "HS256"
@@ -99,6 +108,8 @@ class Settings(BaseSettings):
         "openai_api_key",
         "search_api_key",
         "langchain_api_key",
+        "langfuse_public_key",
+        "langfuse_secret_key",
         "jwt_secret_key",
         "admin_password_hash",
         mode="before",

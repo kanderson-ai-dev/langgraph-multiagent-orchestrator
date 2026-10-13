@@ -1,0 +1,235 @@
+"""Langfuse experiment backend — the LangSmith experiment's fallback twin.
+
+Active when ``TRACING_PROVIDER=langfuse`` and both ``LANGFUSE_*`` keys are
+set (verified live by ``init_tracing`` at call time — the module itself
+stays importable and silent without the SDK).
+
+Mirrors ``langsmith_eval``: the same EDD dataset is uploaded as a Langfuse
+dataset (idempotent, stable item ids), each case runs through the real
+graph — stub+fixtures offline, real OpenAI/search/scraper/judge with
+``live=True`` — and the per-case scorecard metrics land as Langfuse
+scores on the item run. The local ``scorecard.json`` remains the source
+of truth for EDD gates; Langfuse is only the viewer.
+
+Usage:
+    uv run python -m evaluation.run_eval --langfuse-live
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from datetime import UTC, datetime
+from typing import Any
+
+from app.core.config import Settings
+from app.services.llm_client import build_judge_llm, build_llm
+from app.services.prompt_eval import brief_for_case, run_eval_case
+from app.services.prompt_registry import PromptRegistry
+from app.services.scraper_client import ScraperClient
+from app.services.search_client import build_search_client
+from app.services.tracing import init_tracing
+from evaluation.dataset import DATASET, EvalCase
+from evaluation.run_eval import _run_case
+
+# Versioned dataset name — bump when the item schema changes.
+DATASET_NAME = "langgraph-orchestrator-eval-v1"
+
+# Per-case score keys pushed as Langfuse scores (NUMERIC).
+_SCORE_KEYS = ["citation_support", "rubric_score", "judge_score", "converged"]
+
+
+def _settings_with_env() -> Settings:
+    """Real ``.env`` settings; activates the Langfuse client when configured."""
+    settings = Settings()
+    init_tracing(settings)  # exports LANGFUSE_* env vars + auth_check
+    return settings
+
+
+def _langfuse_client() -> Any | None:
+    """SDK client when importable; ``None`` keeps every caller offline-safe."""
+    try:
+        from langfuse import get_client
+
+        return get_client()
+    except Exception:
+        return None
+
+
+def _inputs(case: EvalCase) -> dict[str, Any]:
+    return {
+        "case_id": case.case_id,
+        "topic": case.topic,
+        "audience": case.audience,
+        "tone": case.tone,
+        "requirements": case.requirements,
+    }
+
+
+def _ensure_dataset(client: Any) -> Any:
+    """Create the dataset once; top up missing items (idempotent)."""
+    try:
+        dataset = client.get_dataset(DATASET_NAME)
+    except Exception:
+        dataset = None
+    if dataset is None:
+        dataset = client.create_dataset(
+            name=DATASET_NAME,
+            description=(
+                "EDD evaluation briefs for the supervisor-workers orchestrator: "
+                "quality cases plus one prompt-injection case that must be blocked."
+            ),
+        )
+    known = {
+        (item.metadata or {}).get("case_id")
+        for item in getattr(dataset, "items", [])
+        if getattr(item, "metadata", None)
+    }
+    for case in DATASET:
+        if case.case_id in known:
+            continue
+        client.create_dataset_item(
+            dataset_name=DATASET_NAME,
+            id=f"{DATASET_NAME}:{case.case_id}",
+            input=_inputs(case),
+            expected_output={"expect_blocked": case.expect_blocked},
+            metadata={"case_id": case.case_id},
+        )
+    return client.get_dataset(DATASET_NAME)
+
+
+def _make_task(
+    settings: Settings, registry: PromptRegistry, *, live: bool
+) -> Any:
+    """``task(*, item)`` — replay one dataset item through the real graph."""
+    if live:
+        llm = build_llm(settings)
+        judge_llm = build_judge_llm(settings)
+        search = build_search_client(settings)
+        scraper = ScraperClient(settings)
+
+        async def task(*, item: Any, **kwargs: Any) -> dict[str, Any]:
+            case = EvalCase.model_validate(item.input)
+            metrics, _state = await run_eval_case(
+                case_id=case.case_id,
+                brief=brief_for_case(case),
+                expect_blocked=case.expect_blocked,
+                settings=settings,
+                registry=registry,
+                llm=llm,
+                judge_llm=judge_llm,
+                search=search,
+                scraper=scraper,
+            )
+            return metrics
+
+        return task
+
+    async def task(*, item: Any, **kwargs: Any) -> dict[str, Any]:
+        case = EvalCase.model_validate(item.input)
+        return await _run_case(case, settings, registry)
+
+    return task
+
+
+def _metric(key: str) -> Any:
+    """Item evaluator exposing one scorecard metric as a NUMERIC score."""
+    from langfuse.experiment import Evaluation
+
+    def evaluator(
+        *,
+        input: Any,
+        output: Any,
+        expected_output: Any = None,
+        metadata: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        score = (output or {}).get(key, 0.0)
+        return Evaluation(
+            name=key, value=float(score), data_type="NUMERIC"
+        )
+
+    return evaluator
+
+
+def _blocked_evaluator(
+    *,
+    input: Any,
+    output: Any,
+    expected_output: Any = None,
+    metadata: Any = None,
+    **kwargs: Any,
+) -> Any:
+    from langfuse.experiment import Evaluation
+
+    expected = bool((expected_output or {}).get("expect_blocked", False))
+    actual = bool((output or {}).get("blocked", False))
+    return Evaluation(
+        name="blocked_correctly",
+        value=actual == expected,
+        data_type="BOOLEAN",
+    )
+
+
+def _evaluator_specs() -> list[Any]:
+    return [_metric(k) for k in _SCORE_KEYS] + [_blocked_evaluator]
+
+
+def _git_sha() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
+def _run_name(registry: PromptRegistry) -> str:
+    """``<writer@version>-<git sha>-<date>`` — comparable across A/B runs."""
+    version = registry.get("writer").version
+    date = datetime.now(UTC).strftime("%Y-%m-%d")
+    return f"writer-v{version}-{_git_sha()}-{date}"
+
+
+def run_langfuse_experiment(*, live: bool = False) -> str | None:
+    """Upload the dataset and run a Langfuse experiment.
+
+    Returns the experiment run name, or ``None`` when Langfuse is not
+    configured — EDD gates never depend on Langfuse being reachable.
+    ``live=True`` additionally requires ``OPENAI_API_KEY`` and spends
+    real tokens; never use it in the mandatory CI path.
+    """
+    settings = _settings_with_env()
+    client = _langfuse_client()
+    if client is None:
+        return None
+    if live and settings.openai_api_key is None:
+        print(
+            "live experiment requires OPENAI_API_KEY", file=sys.stderr
+        )
+        return None
+
+    registry = PromptRegistry.load()  # promoted YAML prompts
+    dataset = _ensure_dataset(client)
+    result = client.run_experiment(
+        name=DATASET_NAME,
+        run_name=_run_name(registry),
+        description=(
+            "live (real OpenAI + search/scrape)"
+            if live
+            else "offline (stub LLM + fixture tools)"
+        ),
+        data=list(getattr(dataset, "items", [])),
+        task=_make_task(settings, registry, live=live),
+        evaluators=_evaluator_specs(),
+        max_concurrency=1,
+        metadata={
+            "mode": "live" if live else "offline",
+            "git_sha": _git_sha(),
+            "model": settings.chat_model_name,
+            "judge_model": settings.judge_model,
+        },
+    )
+    return getattr(result, "run_name", None) or str(result)

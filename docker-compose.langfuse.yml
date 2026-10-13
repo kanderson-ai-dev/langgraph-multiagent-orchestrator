@@ -1,0 +1,51 @@
+# Optional Langfuse self-host stack — use only if you want traces to stay
+# on your own infra instead of Langfuse Cloud. The SaaS (cloud.langfuse.com)
+# works with no extra setup; this file is a convenience, never a dependency.
+#
+#   docker compose -f docker-compose.langfuse.yml up -d
+#
+# Then point the app at it:
+#   TRACING_PROVIDER=langfuse
+#   LANGFUSE_BASE_URL=http://localhost:3000
+#   LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY  (created in the Langfuse UI
+#   under Settings -> API Keys after first boot)
+#
+# Volumes are named and credentials live in your shell env, not in this file.
+# Requires LANGFUSE_NEXTAUTH_SECRET, LANGFUSE_SALT and LANGFUSE_DB_PASSWORD
+# to be exported before `up`.
+
+services:
+  langfuse-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD}
+    volumes:
+      - langfuse-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  langfuse:
+    image: langfuse/langfuse:3
+    restart: unless-stopped
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD}@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
+      SALT: ${LANGFUSE_SALT}
+      # Disable public sign-up so only you create the first account.
+      AUTH_DISABLE_SIGNUP: "true"
+      TELEMETRY_ENABLED: "false"
+
+volumes:
+  langfuse-db-data:

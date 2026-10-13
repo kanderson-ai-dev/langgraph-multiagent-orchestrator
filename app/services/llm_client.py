@@ -68,7 +68,8 @@ class OpenAIStructuredLLM:
                     "prompt_sha256": context.get("prompt_sha256"),
                 },
                 "tags": [
-                    f"prompt:{context['prompt_name']}@v{context['prompt_version']}"
+                    f"prompt:{context['prompt_name']}"
+                    f"@v{context.get('prompt_version', '?')}"
                 ],
             }
         result = await runnable.ainvoke(

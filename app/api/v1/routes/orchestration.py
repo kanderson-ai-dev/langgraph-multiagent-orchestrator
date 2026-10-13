@@ -18,6 +18,7 @@ from app.core.rate_limit import RateLimiter
 from app.graph.state import Brief
 from app.services.job_runner import JobRunner
 from app.services.job_store import JobRecord, JobStore
+from app.services.tracing import create_trace_id
 
 router = APIRouter(prefix="/orchestration", tags=["orchestration"])
 
@@ -66,6 +67,7 @@ def _jobs(request: Request) -> JobStore:
 async def submit(
     body: SubmitRequest,
     request: Request,
+    response: Response,
     ctx: RequestContext = Depends(get_context),
     settings: Settings = Depends(get_settings),
     limiter: RateLimiter = Depends(get_rate_limiter),
@@ -79,7 +81,14 @@ async def submit(
     except ValidationError:
         raise HTTPException(status_code=422, detail="invalid brief") from None
     job = await _jobs(request).create(ctx.workspace_id, brief)
-    await _runner(request).submit(job.job_id, ctx.workspace_id, brief)
+    # Mint the trace id up-front so the header names the trace the
+    # background run will land in (no-op when tracing is off).
+    trace_id = create_trace_id()
+    await _runner(request).submit(
+        job.job_id, ctx.workspace_id, brief, trace_id=trace_id
+    )
+    if trace_id:
+        response.headers["X-Trace-Id"] = trace_id
     return _record_to_response(job)
 
 

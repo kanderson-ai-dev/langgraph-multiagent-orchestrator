@@ -22,6 +22,7 @@ from app.graph.graph import initial_state
 from app.graph.state import Brief
 from app.services.job_store import JobStore
 from app.services.prompt_registry import PromptRegistry
+from app.services.tracing import bind_trace
 from app.services.usage_store import UsageStore
 
 logger = get_logger(__name__)
@@ -47,6 +48,7 @@ class JobRunner:
         self._queues: dict[str, list[asyncio.Queue[dict[str, Any]]]] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._last_values: dict[str, dict[str, Any]] = {}
+        self._trace_ids: dict[str, str] = {}
 
     @property
     def job_store(self) -> JobStore:
@@ -84,8 +86,17 @@ class JobRunner:
         finally:
             self._queues[job_id].remove(q)
 
-    async def submit(self, job_id: str, workspace_id: str, brief: Brief) -> None:
+    async def submit(
+        self,
+        job_id: str,
+        workspace_id: str,
+        brief: Brief,
+        *,
+        trace_id: str | None = None,
+    ) -> None:
         """Launch a job in the background."""
+        if trace_id:
+            self._trace_ids[job_id] = trace_id
         task = asyncio.create_task(self._run(job_id, workspace_id, brief))
         self._tasks[job_id] = task
         task.add_done_callback(lambda t: self._tasks.pop(job_id, None))
@@ -118,11 +129,25 @@ class JobRunner:
                         else self._settings.default_job_budget_usd
                     ),
                 )
-                async for chunk in self._graph.astream(
-                    state, config=self._config(job_id),
-                    stream_mode=["updates", "values"],
-                ):
-                    self._handle_chunk(job_id, chunk)
+                with bind_trace(
+                    name=f"job:{job_id}",
+                    session_id=job_id,
+                    metadata={
+                        "job_id": job_id,
+                        "workspace_id": workspace_id,
+                        "report_type": brief.report_type,
+                    },
+                    tags=["job"],
+                    trace_id=self._trace_ids.get(job_id),
+                ) as callbacks:
+                    config: RunnableConfig = {
+                        **self._config(job_id), "callbacks": callbacks
+                    }
+                    async for chunk in self._graph.astream(
+                        state, config=config,
+                        stream_mode=["updates", "values"],
+                    ):
+                        self._handle_chunk(job_id, chunk)
         except Exception as exc:
             logger.exception("job_failed", job_id=job_id)
             await self._jobs.update_status(workspace_id, job_id, "failed")
@@ -143,12 +168,23 @@ class JobRunner:
         started = time.monotonic()
         try:
             async with bind_tracker(tracker):
-                async for chunk in self._graph.astream(
-                    Command(resume=decision),
-                    config=self._config(job_id),
-                    stream_mode=["updates", "values"],
-                ):
-                    self._handle_chunk(job_id, chunk)
+                # Resume rejoins the job's original trace when it exists.
+                with bind_trace(
+                    name=f"job:{job_id}:resume",
+                    session_id=job_id,
+                    metadata={"job_id": job_id, "workspace_id": workspace_id},
+                    tags=["job", "hitl-resume"],
+                    trace_id=self._trace_ids.get(job_id),
+                ) as callbacks:
+                    config: RunnableConfig = {
+                        **self._config(job_id), "callbacks": callbacks
+                    }
+                    async for chunk in self._graph.astream(
+                        Command(resume=decision),
+                        config=config,
+                        stream_mode=["updates", "values"],
+                    ):
+                        self._handle_chunk(job_id, chunk)
         except Exception as exc:
             logger.exception("resume_failed", job_id=job_id)
             self._emit(job_id, {"node": "runner", "error": str(exc), "terminal": True})

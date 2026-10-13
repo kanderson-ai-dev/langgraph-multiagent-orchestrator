@@ -255,6 +255,15 @@ curl -s http://localhost:8000/api/v1/orchestration/reports/<job_id>/audit
 - **LangSmith**: set `LANGCHAIN_API_KEY` + `LANGCHAIN_TRACING_V2=true` and
   every run is traced — `evaluation/run_eval.py --langsmith` pushes the EDD
   dataset as a versioned experiment.
+- **Langfuse** (fallback backend, `TRACING_PROVIDER=langfuse`): OTel-based
+  tracing via the `langfuse` SDK — one trace per job (HITL resumes rejoin
+  it), per-generation `prompt_version`/hash metadata, payload masking
+  (secrets + system-prompt text) before export, and a `X-Trace-Id` response
+  header on job submit. `run_eval.py --langfuse-live` publishes the same
+  EDD dataset + scores as a Langfuse experiment; `docker-compose.langfuse.yml`
+  offers an optional self-host stack. When Langfuse wins the provider slot,
+  LangSmith export stays off — never double-traced. With no keys it is a
+  silent no-op, so CI and offline tests never touch the network.
 - **Checkpoints**: LangGraph `AsyncSqliteSaver` per `job_id` — paused jobs
   survive restarts and resume exactly where the `interrupt()` fired.
 
@@ -304,6 +313,9 @@ named volume; `.env` is read at runtime — no secrets are baked in.
 | `SEARCH_PROVIDER` | no | — | `auto` \| `tavily` \| `duckduckgo` \| `none` |
 | `SEARCH_API_KEY` | no | ✅ | Tavily key (enables the paid provider) |
 | `LANGCHAIN_API_KEY` / `LANGCHAIN_TRACING_V2` | no | ✅ | LangSmith tracing + eval experiments |
+| `TRACING_PROVIDER` | no | — | `langsmith` \| `langfuse` \| `none` (default) |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | no | ✅ | Langfuse tracing + experiments |
+| `LANGFUSE_BASE_URL` | no | — | Langfuse region/self-host (default cloud) |
 | `JWT_SECRET_KEY` / `ADMIN_PASSWORD_HASH` | no | ✅ | Enables JWT auth (else open local dev) |
 | `MAX_DEBATE_ROUNDS` | no | — | Writer↔Reviewer cap before escalation |
 | `MAX_WORKER_DISPATCHES` | no | — | Per-worker dispatch cap (anti-loop guard) |

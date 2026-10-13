@@ -27,6 +27,7 @@ from app.services.llm_client import build_llm
 from app.services.prompt_registry import DEFAULT_PROMPTS_DIR, PromptRegistry
 from app.services.scraper_client import ScraperClient
 from app.services.search_client import build_search_client
+from app.services.tracing import init_tracing, shutdown_tracing
 from app.services.usage_store import UsageStore
 
 logger = get_logger(__name__)
@@ -87,6 +88,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings)
     tracing = configure_tracing(settings)
+    # Langfuse is opt-in; when it wins the provider slot it disables the
+    # LangSmith env flags init_tracing may have just exported.
+    tracing_provider = init_tracing(settings)
     # Tests may pre-populate app.state.runner/job_store/usage_store via
     # dependency overrides before the lifespan runs.
     async with AsyncExitStack() as stack:
@@ -114,8 +118,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             search_provider=settings.effective_search_provider,
             llm_configured=settings.openai_api_key is not None,
             langsmith_tracing=tracing,
+            tracing_provider=tracing_provider,
         )
         yield
+    shutdown_tracing()
     logger.info("app_shutdown")
 
 

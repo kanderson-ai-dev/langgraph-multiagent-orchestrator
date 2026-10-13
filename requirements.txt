@@ -18,6 +18,8 @@ anyio==4.15.1
     #   watchfiles
 ast-serialize==0.11.2
     # via mypy
+backoff==2.2.1
+    # via langfuse
 bcrypt==5.0.0
     # via langgraph-multiagent-orchestrator
 beautifulsoup4==4.15.0
@@ -66,6 +68,8 @@ fonttools==4.66.0
     # via fpdf2
 fpdf2==2.8.8
     # via langgraph-multiagent-orchestrator
+googleapis-common-protos==1.75.5
+    # via opentelemetry-exporter-otlp-proto-http
 h11==0.16.0
     # via
     #   httpcore
@@ -80,6 +84,7 @@ httptools==0.8.0
 httpx==0.28.1
     # via
     #   langchain-core
+    #   langfuse
     #   langgraph-multiagent-orchestrator
     #   langgraph-sdk
     #   respx
@@ -103,8 +108,11 @@ jsonpatch==1.33
     # via langchain-core
 jsonpointer==3.1.1
     # via jsonpatch
-langchain-core==1.6.5
+langchain==1.4.5
+    # via langgraph-multiagent-orchestrator
+langchain-core==1.6.10
     # via
+    #   langchain
     #   langchain-openai
     #   langgraph
     #   langgraph-checkpoint
@@ -117,8 +125,12 @@ langchain-protocol==0.0.19
     # via
     #   langchain-core
     #   langgraph-sdk
-langgraph==1.2.12
+langfuse==4.17.0
     # via langgraph-multiagent-orchestrator
+langgraph==1.2.12
+    # via
+    #   langchain
+    #   langgraph-multiagent-orchestrator
 langgraph-checkpoint==4.2.0
     # via
     #   langgraph
@@ -151,6 +163,32 @@ mypy-extensions==1.1.0
     # via mypy
 openai==3.19.2
     # via langchain-openai
+opentelemetry-api==1.45.1
+    # via
+    #   langfuse
+    #   opentelemetry-exporter-http-transport
+    #   opentelemetry-exporter-otlp-proto-http
+    #   opentelemetry-sdk
+    #   opentelemetry-semantic-conventions
+opentelemetry-exporter-http-transport==0.66b1
+    # via opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-otlp-common==0.66b1
+    # via opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-otlp-proto-common==1.45.1
+    # via opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-otlp-proto-http==1.45.1
+    # via langfuse
+opentelemetry-proto==1.45.1
+    # via
+    #   opentelemetry-exporter-otlp-proto-common
+    #   opentelemetry-exporter-otlp-proto-http
+opentelemetry-sdk==1.45.1
+    # via
+    #   langfuse
+    #   opentelemetry-exporter-otlp-common
+    #   opentelemetry-exporter-otlp-proto-http
+opentelemetry-semantic-conventions==0.66b1
+    # via opentelemetry-sdk
 orjson==3.12.0
     # via
     #   langgraph-sdk
@@ -162,6 +200,7 @@ packageurl-python==0.17.6
 packaging==26.3
     # via
     #   langchain-core
+    #   langfuse
     #   langsmith
     #   pip-audit
     #   pip-requirements-parser
@@ -195,6 +234,10 @@ prometheus-client==0.26.0
     # via prometheus-fastapi-instrumentator
 prometheus-fastapi-instrumentator==8.1.0
     # via langgraph-multiagent-orchestrator
+protobuf==7.36.2
+    # via
+    #   googleapis-common-protos
+    #   opentelemetry-proto
 py-serializable==2.1.0
     # via cyclonedx-python-lib
 pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
@@ -202,7 +245,9 @@ pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementatio
 pydantic==2.13.5
     # via
     #   fastapi
+    #   langchain
     #   langchain-core
+    #   langfuse
     #   langgraph
     #   langgraph-multiagent-orchestrator
     #   langsmith
@@ -248,6 +293,8 @@ requests==2.34.2
     # via
     #   cachecontrol
     #   langsmith
+    #   opentelemetry-exporter-http-transport
+    #   opentelemetry-exporter-otlp-proto-http
     #   pip-audit
     #   requests-toolbelt
     #   tiktoken
@@ -304,9 +351,14 @@ typing-extensions==4.16.0
     #   httpx2
     #   langchain-core
     #   langchain-protocol
+    #   langfuse
     #   langsmith
     #   mypy
     #   openai
+    #   opentelemetry-api
+    #   opentelemetry-exporter-otlp-proto-http
+    #   opentelemetry-sdk
+    #   opentelemetry-semantic-conventions
     #   pydantic
     #   pydantic-core
     #   pytest-asyncio
@@ -337,7 +389,9 @@ websockets==16.1.1
     #   langsmith
     #   uvicorn
 wrapt==2.5.0
-    # via vcrpy
+    # via
+    #   langfuse
+    #   vcrpy
 xxhash==4.0.1
     # via
     #   langgraph

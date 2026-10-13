@@ -152,6 +152,17 @@ async def _main() -> int:
         help="also publish the dataset and run a LangSmith experiment",
     )
     parser.add_argument(
+        "--langsmith-live",
+        action="store_true",
+        help="publish a real-LLM LangSmith experiment (requires OPENAI_API_KEY)",
+    )
+    parser.add_argument(
+        "--langfuse-live",
+        action="store_true",
+        help="publish a real-LLM Langfuse experiment "
+        "(requires LANGFUSE_* keys + OPENAI_API_KEY)",
+    )
+    parser.add_argument(
         "--prompt-overrides",
         default="",
         help="pin prompt versions for the run, e.g. writer=2,reviewer=1",
@@ -201,14 +212,25 @@ async def _main() -> int:
     if args.report:
         render_trend(read_history(), latest_results=results)
 
-    if args.langsmith:
+    if args.langsmith or args.langsmith_live:
         from evaluation.langsmith_eval import run_langsmith_experiment
 
-        name = await asyncio.to_thread(run_langsmith_experiment)
+        name = await asyncio.to_thread(
+            run_langsmith_experiment, live=args.langsmith_live
+        )
         if name:
             print(f"LangSmith experiment published: {name}")
         else:
-            print("LangSmith skipped: LANGCHAIN_API_KEY not configured")
+            print("LangSmith skipped: required key not configured")
+
+    if args.langfuse_live:
+        from evaluation.langfuse_eval import run_langfuse_experiment
+
+        name = await asyncio.to_thread(run_langfuse_experiment, live=True)
+        if name:
+            print(f"Langfuse experiment published: {name}")
+        else:
+            print("Langfuse skipped: required keys not configured")
 
     _print_scorecard(metrics, baseline, gates)
     failed = [k for k, ok in gates.items() if not ok]

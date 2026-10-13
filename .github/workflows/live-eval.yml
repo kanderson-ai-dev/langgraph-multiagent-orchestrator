@@ -32,9 +32,10 @@ jobs:
         run: uv sync --frozen
 
       # Live eval is informational: failures surface as a failing workflow
-      # run plus artifacts — they never block PRs.
+      # run plus artifacts — they never block PRs. --langsmith-live publishes
+      # a real-model LangSmith experiment (spends real tokens).
       - name: Run live evaluation
-        run: uv run python -m evaluation.run_eval --report --langsmith
+        run: uv run python -m evaluation.run_eval --report --langsmith-live
         continue-on-error: false
 
       - name: Upload scorecard + trend artifacts

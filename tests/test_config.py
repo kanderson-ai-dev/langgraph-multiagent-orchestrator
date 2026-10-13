@@ -9,10 +9,27 @@ def test_empty_string_secrets_become_none(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("OPENAI_API_KEY", "")
     monkeypatch.setenv("SEARCH_API_KEY", "   ")
     monkeypatch.setenv("JWT_SECRET_KEY", "")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "")
     s = Settings(_env_file=None)
     assert s.openai_api_key is None
     assert s.search_api_key is None
     assert s.jwt_secret_key is None
+    assert s.langfuse_public_key is None
+    assert s.langfuse_secret_key is None
+
+
+def test_secrets_never_serialize_plain() -> None:
+    """SecretStr repr/dump must not leak values — covers Langfuse keys."""
+    s = Settings(
+        _env_file=None,
+        langfuse_public_key="pk-lf-live",
+        langfuse_secret_key="sk-lf-live",
+    )
+    for blob in (repr(s), str(s.model_dump()), repr(s.model_dump())):
+        assert "pk-lf-live" not in blob
+        assert "sk-lf-live" not in blob
+    assert s.tracing_provider == "none"  # keys alone never enable tracing
 
 
 def test_auth_disabled_without_credentials() -> None:

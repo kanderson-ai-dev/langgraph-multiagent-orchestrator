@@ -1,0 +1,6 @@
+# False positive: an Azure Application Insights instrumentation key embedded
+# in third-party page HTML captured by the recorded EDD cassette. It is the
+# scraped site's own public client-side telemetry id, not a project secret;
+# the working-tree copy is scrubbed and this fingerprint only silences the
+# historical blob.
+2028cb2ae228416fb78eb60cfd4e342d733f2a1a:tests/cassettes/edd_rag-saas.yaml:generic-api-key:1828

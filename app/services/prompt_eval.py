@@ -30,6 +30,7 @@ from app.services.llm_client import StubLLM, build_judge_llm
 from app.services.prompt_registry import PromptRegistry
 from app.services.scraper_client import ScrapedPage
 from app.services.search_client import SearchResult
+from app.services.tracing import bind_trace
 from app.services.usage_store import UsageStore
 
 # Gated metrics — identical to the project objective / CI thresholds.
@@ -108,8 +109,15 @@ async def judge_report(
     *,
     judge_system: str,
     judge_llm: Any,
+    judge_prompt: Any = None,
 ) -> float:
     """Grade a finished report with the judge model; returns its 1–5 score."""
+    context: dict[str, Any] = {"prompt_name": "judge"}
+    if judge_prompt is not None:
+        context.update(
+            prompt_version=judge_prompt.version,
+            prompt_sha256=judge_prompt.sha256,
+        )
     out = await judge_llm.structured(
         JudgeOutput,
         system=judge_system,
@@ -118,7 +126,7 @@ async def judge_report(
             f"tone: {brief.tone}; requirements: {brief.requirements}\n\n"
             f"Final report:\n{report}"
         ),
-        context={"prompt_name": "judge"},
+        context=context,
     )
     return float(out.score)
 
@@ -171,11 +179,15 @@ async def run_eval_case(
     registry: PromptRegistry,
     llm: Any = None,
     judge_llm: Any = None,
+    search: Any = None,
+    scraper: Any = None,
 ) -> tuple[dict[str, Any], OrchestrationState]:
     """Run one dataset case through the real graph.
 
     Returns ``(metrics, state)`` — callers aggregate the metrics and may
-    mine the state (evidence, prompt versions, final report).
+    mine the state (evidence, prompt versions, final report). Offline by
+    default; live callers inject a real ``llm`` plus real ``search`` /
+    ``scraper`` clients.
     """
     from evaluation.evaluators import (
         blocked_correctly,
@@ -187,8 +199,8 @@ async def run_eval_case(
     graph = build_graph(
         settings,
         llm=llm or build_eval_stub(),
-        search=FixtureSearch(),
-        scraper=FixtureScraper(),  # type: ignore[arg-type]
+        search=search or FixtureSearch(),
+        scraper=scraper or FixtureScraper(),  # type: ignore[arg-type]
         prompts=registry,
     )
     state = initial_state(
@@ -208,7 +220,16 @@ async def run_eval_case(
             settings=settings,
         )
         async with bind_tracker(tracker):
-            out = cast(OrchestrationState, await graph.ainvoke(state))
+            with bind_trace(
+                name=f"eval:{case_id}",
+                session_id=f"eval-{case_id}",
+                metadata={"case_id": case_id, "kind": "edd-eval"},
+                tags=["eval"],
+            ) as callbacks:
+                out = cast(
+                    OrchestrationState,
+                    await graph.ainvoke(state, config={"callbacks": callbacks}),
+                )
 
     # LLM-as-judge on the finished report — a distinct model when
     # credentials allow; a deterministic stub builder offline.
@@ -216,11 +237,13 @@ async def run_eval_case(
     if isinstance(judge_llm, StubLLM):
         judge_llm.register_default("JudgeOutput", _judge_builder)
     report = out.get("final_report")
+    judge_prompt = registry.render("judge")
     judge_score = (
         await judge_report(
             brief, report,
-            judge_system=registry.render("judge").text,
+            judge_system=judge_prompt.text,
             judge_llm=judge_llm,
+            judge_prompt=judge_prompt,
         )
         if report
         else 0.0
