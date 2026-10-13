@@ -41,13 +41,18 @@ def make_llm_decider(llm: StructuredLLM, prompts: PromptRegistry) -> RouterDecid
     """
 
     async def decide(state: dict[str, Any], registry: WorkerRegistry) -> RoutingDecision:
+        from app.core.cost_tracking import tracked_structured
+
         system = prompts.render(
             "supervisor",
             catalog=registry.catalog(),
             state_summary=_state_summary(state),
         )
-        route = await llm.structured(
+        route: RoutingDecision = await tracked_structured(
+            llm,
             SupervisorRoute,
+            role="supervisor",
+            model="",
             system=system.text,
             user="Pick the next worker (or FINISH).",
             context={

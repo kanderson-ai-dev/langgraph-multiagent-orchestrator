@@ -150,6 +150,7 @@ class ResearcherWorker:
                 f"Gathered {len(evidence)} evidence items "
                 f"across {len(queries)} queries."
             ),
+            prompt_version=system.version,
         )
         from app.core.cost_tracking import current_cost
 
@@ -157,5 +158,6 @@ class ResearcherWorker:
             "sub_questions": plan.sub_questions,
             "evidence": evidence,
             "cost_so_far": current_cost(),
+            "prompt_versions": {system.name: system.version},
             "transcript": [msg],
         }

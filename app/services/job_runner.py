@@ -224,6 +224,7 @@ class JobRunner:
                         m.model_dump(mode="json") for m in transcript
                     ],
                     "debate_rounds": values.get("debate_round", 0),
+                    "prompt_versions": values.get("prompt_versions", {}),
                     "duration_seconds": round(time.monotonic() - started, 3),
                 },
                 cost_usd=cost,
@@ -238,6 +239,7 @@ class JobRunner:
                     "escalation_reason": values.get("escalation_reason"),
                     "debate_round": values.get("debate_round", 0),
                     "max_debate_rounds": values.get("max_debate_rounds"),
+                    "prompt_versions": values.get("prompt_versions", {}),
                 },
                 cost_usd=cost,
                 status="awaiting_review",

@@ -127,7 +127,13 @@ class WriterWorker:
             kind="result",
             content=f"{action} report v{version}: {draft.title}",
             round=state.get("debate_round", 0),
+            prompt_version=system.version,
         )
         from app.core.cost_tracking import current_cost
 
-        return {"drafts": [draft], "cost_so_far": current_cost(), "transcript": [msg]}
+        return {
+            "drafts": [draft],
+            "cost_so_far": current_cost(),
+            "prompt_versions": {system.name: system.version},
+            "transcript": [msg],
+        }

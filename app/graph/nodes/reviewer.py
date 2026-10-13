@@ -167,6 +167,7 @@ class ReviewerWorker:
                 f"support {rate:.2f})"
             ),
             round=debate_round,
+            prompt_version=system.version,
         )
         from app.core.cost_tracking import current_cost
 
@@ -174,5 +175,6 @@ class ReviewerWorker:
             "latest_verdict": verdict,
             "debate_round": debate_round,
             "cost_so_far": current_cost(),
+            "prompt_versions": {system.name: system.version},
             "transcript": [msg],
         }

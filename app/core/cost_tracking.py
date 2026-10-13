@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.core.config import Settings
-from app.core.metrics import LLM_COST_USD, LLM_TOKENS_TOTAL
+from app.core.metrics import LLM_CALLS_TOTAL, LLM_COST_USD, LLM_TOKENS_TOTAL
 from app.services.usage_store import UsageStore
 
 _current: contextvars.ContextVar["UsageTracker | None"] = contextvars.ContextVar(
@@ -30,6 +30,9 @@ class UsageRecord(BaseModel):
     completion_tokens: int = 0
     cost_usd: float = 0.0
     latency_ms: float = 0.0
+    prompt_name: str | None = None
+    prompt_version: int | None = None
+    prompt_sha256: str | None = None
 
 
 class UsageTracker:
@@ -66,6 +69,9 @@ class UsageTracker:
         prompt_tokens: int,
         completion_tokens: int,
         latency_ms: float = 0.0,
+        prompt_name: str | None = None,
+        prompt_version: int | None = None,
+        prompt_sha256: str | None = None,
     ) -> UsageRecord:
         cost = self.compute_cost(prompt_tokens, completion_tokens)
         rec = UsageRecord(
@@ -75,11 +81,20 @@ class UsageTracker:
             completion_tokens=completion_tokens,
             cost_usd=cost,
             latency_ms=latency_ms,
+            prompt_name=prompt_name,
+            prompt_version=prompt_version,
+            prompt_sha256=prompt_sha256,
         )
         self.records.append(rec)
         LLM_TOKENS_TOTAL.labels(role=role, kind="prompt").inc(prompt_tokens)
         LLM_TOKENS_TOTAL.labels(role=role, kind="completion").inc(completion_tokens)
         LLM_COST_USD.labels(role=role).inc(cost)
+        LLM_CALLS_TOTAL.labels(
+            role=role,
+            prompt_version=(
+                f"{prompt_name}@v{prompt_version}" if prompt_version else "unknown"
+            ),
+        ).inc()
         await self._store.record(
             job_id=self.job_id,
             workspace_id=self.workspace_id,
@@ -89,6 +104,9 @@ class UsageTracker:
             completion_tokens=completion_tokens,
             cost_usd=cost,
             latency_ms=latency_ms,
+            prompt_name=prompt_name,
+            prompt_version=prompt_version,
+            prompt_sha256=prompt_sha256,
         )
         return rec
 
@@ -136,10 +154,14 @@ async def tracked_structured(
     result = await llm.structured(schema, system=system, user=user, context=context)
     prompt_tokens = (len(system) + len(user)) // 4
     completion_tokens = len(str(result)) // 4
+    ctx = context or {}
     await track_llm_call(
         role=role, model=model,
         prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
         started_at=started,
+        prompt_name=ctx.get("prompt_name"),
+        prompt_version=ctx.get("prompt_version"),
+        prompt_sha256=ctx.get("prompt_sha256"),
     )
     return result
 
@@ -151,6 +173,9 @@ async def track_llm_call(
     prompt_tokens: int,
     completion_tokens: int,
     started_at: float | None = None,
+    prompt_name: str | None = None,
+    prompt_version: int | None = None,
+    prompt_sha256: str | None = None,
 ) -> None:
     """Record an LLM call if a tracker is bound (no-op otherwise)."""
     tracker = _current.get()
@@ -163,4 +188,7 @@ async def track_llm_call(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         latency_ms=latency_ms,
+        prompt_name=prompt_name,
+        prompt_version=prompt_version,
+        prompt_sha256=prompt_sha256,
     )

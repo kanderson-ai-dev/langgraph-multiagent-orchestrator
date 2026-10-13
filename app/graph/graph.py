@@ -132,6 +132,7 @@ def build_graph(
     if isinstance(llm, StubLLM):
         _register_stub_builders(llm)
 
+    using_llm_decider = decider is None and not isinstance(llm, StubLLM)
     if decider is None:
         decider = (
             rule_based_decider
@@ -170,6 +171,7 @@ def build_graph(
         verdict = state.get("latest_verdict")
         rounds = state.get("debate_round", 0)
         max_rounds = state.get("max_debate_rounds", settings.max_debate_rounds)
+        decided_via_llm = False
 
         # Cost governance: a spent budget stops all further paid work before
         # the decider itself burns tokens. An approved draft may still finish.
@@ -244,14 +246,20 @@ def build_graph(
                     )
                     for d in decision.dispatches
                 ]
-                return {
+                fanout_update: dict[str, Any] = {
                     "pending_sends": sends,
                     "next_worker": None,
                     "dispatches": state.get("dispatches", 0) + len(sends),
                     "transcript": msgs,
                 }
+                if using_llm_decider:
+                    fanout_update["prompt_versions"] = {
+                        "supervisor": prompts.get("supervisor").version
+                    }
+                return fanout_update
             nxt = decision.next_worker
             reason = decision.reason
+            decided_via_llm = using_llm_decider
 
         target = FINISH if nxt == FINISH else nxt
         msg = AgentMessage(
@@ -263,6 +271,10 @@ def build_graph(
             "pending_sends": [],
             "transcript": [msg],
         }
+        if decided_via_llm:
+            update["prompt_versions"] = {
+                "supervisor": prompts.get("supervisor").version
+            }
         if target in registry:
             update["dispatches"] = state.get("dispatches", 0) + 1
         if target == "human_review":
@@ -500,4 +512,5 @@ def initial_state(
         ),
         "escalation_reason": None,
         "audit_root": None,
+        "prompt_versions": {},
     }

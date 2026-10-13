@@ -188,7 +188,15 @@ async def report_pdf(
     from app.services.pdf_export import markdown_to_pdf
 
     report_md = str(job.result["report"])
-    pdf = markdown_to_pdf(report_md, title=job.brief.topic)
+    raw_versions = job.result.get("prompt_versions")
+    prompt_versions = raw_versions if isinstance(raw_versions, dict) else {}
+    footer = ""
+    if prompt_versions:
+        rendered = " · ".join(
+            f"{name} v{ver}" for name, ver in sorted(prompt_versions.items())
+        )
+        footer = f"Prompt versions: {rendered}"
+    pdf = markdown_to_pdf(report_md, title=job.brief.topic, footer=footer)
     return Response(
         content=pdf,
         media_type="application/pdf",

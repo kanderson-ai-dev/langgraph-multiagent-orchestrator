@@ -36,6 +36,14 @@ def keep_max(existing: float | None, incoming: float) -> float:
     return max(existing or 0.0, incoming)
 
 
+def merge_dicts(
+    existing: dict[str, int] | None, incoming: dict[str, int]
+) -> dict[str, int]:
+    """Reducer for prompt provenance: parallel workers each add their own
+    ``prompt name → version`` entry."""
+    return {**(existing or {}), **incoming}
+
+
 class Brief(BaseModel):
     """User-supplied report brief — the input contract for an orchestration job."""
 
@@ -114,6 +122,7 @@ class AgentMessage(BaseModel):
     kind: Literal["dispatch", "result", "feedback", "verdict", "escalation", "system"]
     content: str
     round: int = Field(default=0, ge=0)
+    prompt_version: int | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -144,3 +153,5 @@ class OrchestrationState(TypedDict, total=False):
     budget_usd: float | None  # hard LLM-spend cap; None = unlimited
     escalation_reason: str | None  # "debate_rounds" | "budget"
     audit_root: str | None
+    # Prompt provenance: prompt name → version used by each LLM call site.
+    prompt_versions: Annotated[dict[str, int], merge_dicts]

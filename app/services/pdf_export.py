@@ -31,8 +31,14 @@ def _line(pdf: FPDF, text: str, *, h: float = 6.0) -> None:
     pdf.multi_cell(0, h, _safe(text), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
-def markdown_to_pdf(markdown: str, *, title: str = "Report") -> bytes:
-    """Convert markdown text to a simple PDF (headings, lists, body text)."""
+def markdown_to_pdf(
+    markdown: str, *, title: str = "Report", footer: str = ""
+) -> bytes:
+    """Convert markdown text to a simple PDF (headings, lists, body text).
+
+    ``footer`` is rendered in small italics at the end of the document —
+    used for prompt-version provenance.
+    """
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -56,4 +62,8 @@ def markdown_to_pdf(markdown: str, *, title: str = "Report") -> bytes:
             continue
         pdf.set_font("helvetica", "", 11)
         _line(pdf, _MD_BOLD.sub(r"\1", stripped))
+    if footer:
+        pdf.ln(6)
+        pdf.set_font("helvetica", "I", 8)
+        _line(pdf, footer, h=4.0)
     return bytes(pdf.output())

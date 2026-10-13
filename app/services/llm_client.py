@@ -9,6 +9,7 @@ Workers and the Supervisor's decider depend on the small
 from collections.abc import Callable
 from typing import Any, Protocol, TypeVar, runtime_checkable
 
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel
 
 from app.core.config import Settings
@@ -55,8 +56,24 @@ class OpenAIStructuredLLM:
         context: dict[str, Any] | None = None,
     ) -> _T:
         runnable = self._model.with_structured_output(schema)
+        # Prompt provenance rides on the run config: LangSmith shows it as
+        # run metadata + a `prompt:<name>@v<N>` tag when tracing is enabled;
+        # it is inert otherwise (no behavior change offline).
+        config: RunnableConfig | None = None
+        if context and context.get("prompt_name"):
+            config = {
+                "metadata": {
+                    "prompt_name": context.get("prompt_name"),
+                    "prompt_version": context.get("prompt_version"),
+                    "prompt_sha256": context.get("prompt_sha256"),
+                },
+                "tags": [
+                    f"prompt:{context['prompt_name']}@v{context['prompt_version']}"
+                ],
+            }
         result = await runnable.ainvoke(
-            [{"role": "system", "content": system}, {"role": "user", "content": user}]
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            config=config,
         )
         return schema.model_validate(result)
 

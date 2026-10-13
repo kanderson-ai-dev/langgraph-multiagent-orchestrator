@@ -24,11 +24,22 @@ CREATE TABLE IF NOT EXISTS usage_events (
     completion_tokens INTEGER NOT NULL DEFAULT 0,
     cost_usd          REAL NOT NULL DEFAULT 0.0,
     latency_ms        REAL NOT NULL DEFAULT 0.0,
+    prompt_name       TEXT,
+    prompt_version    INTEGER,
+    prompt_sha256     TEXT,
     created_at        TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_usage_job ON usage_events(job_id);
 CREATE INDEX IF NOT EXISTS idx_usage_workspace ON usage_events(workspace_id);
 """
+
+# Columns added after the initial release — ALTER TABLE migrations for
+# databases created before prompt provenance existed.
+_MIGRATIONS = (
+    "ALTER TABLE usage_events ADD COLUMN prompt_name TEXT",
+    "ALTER TABLE usage_events ADD COLUMN prompt_version INTEGER",
+    "ALTER TABLE usage_events ADD COLUMN prompt_sha256 TEXT",
+)
 
 
 class UsageEvent(BaseModel):
@@ -41,6 +52,9 @@ class UsageEvent(BaseModel):
     completion_tokens: int = 0
     cost_usd: float = 0.0
     latency_ms: float = 0.0
+    prompt_name: str | None = None
+    prompt_version: int | None = None
+    prompt_sha256: str | None = None
     created_at: datetime
 
 
@@ -65,8 +79,18 @@ class UsageStore:
             Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
             async with aiosqlite.connect(self._db_path) as db:
                 await db.executescript(_SCHEMA)
+                await self._migrate(db)
                 await db.commit()
             self._initialized = True
+
+    async def _migrate(self, db: aiosqlite.Connection) -> None:
+        """Idempotent column adds, guarded by ``PRAGMA table_info``."""
+        cursor = await db.execute("PRAGMA table_info(usage_events)")
+        existing = {row[1] for row in await cursor.fetchall()}
+        for stmt in _MIGRATIONS:
+            column = stmt.rsplit(" ", 2)[-2]
+            if column not in existing:
+                await db.execute(stmt)
 
     @asynccontextmanager
     async def _conn(self) -> AsyncIterator[aiosqlite.Connection]:
@@ -86,6 +110,9 @@ class UsageStore:
         completion_tokens: int = 0,
         cost_usd: float = 0.0,
         latency_ms: float = 0.0,
+        prompt_name: str | None = None,
+        prompt_version: int | None = None,
+        prompt_sha256: str | None = None,
     ) -> UsageEvent:
         event = UsageEvent(
             event_id=str(uuid.uuid4()),
@@ -97,13 +124,17 @@ class UsageStore:
             completion_tokens=completion_tokens,
             cost_usd=cost_usd,
             latency_ms=latency_ms,
+            prompt_name=prompt_name,
+            prompt_version=prompt_version,
+            prompt_sha256=prompt_sha256,
             created_at=datetime.now(UTC),
         )
         async with self._conn() as db:
             await db.execute(
                 "INSERT INTO usage_events (event_id, job_id, workspace_id, role,"
                 " model, prompt_tokens, completion_tokens, cost_usd, latency_ms,"
-                " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " prompt_name, prompt_version, prompt_sha256, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     event.event_id,
                     event.job_id,
@@ -114,6 +145,9 @@ class UsageStore:
                     event.completion_tokens,
                     event.cost_usd,
                     event.latency_ms,
+                    event.prompt_name,
+                    event.prompt_version,
+                    event.prompt_sha256,
                     event.created_at.isoformat(),
                 ),
             )

@@ -25,6 +25,7 @@ class AuditEntry(BaseModel):
     index: int
     sender: str
     kind: str
+    prompt_version: int | None = None
     prev_hash: str
     hash: str
 
@@ -38,6 +39,7 @@ def _canonical(msg: AgentMessage) -> str:
             "kind": msg.kind,
             "content": msg.content,
             "round": msg.round,
+            "prompt_version": msg.prompt_version,
             "created_at": msg.created_at.isoformat(),
         },
         sort_keys=True,
@@ -54,6 +56,7 @@ def chain_transcript(messages: list[AgentMessage]) -> list[AuditEntry]:
         entries.append(
             AuditEntry(
                 index=i, sender=m.sender, kind=m.kind,
+                prompt_version=m.prompt_version,
                 prev_hash=prev, hash=digest,
             )
         )

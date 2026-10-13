@@ -66,9 +66,11 @@ class SpecialistWorker:
         from app.core.cost_tracking import tracked_structured
 
         context: dict[str, Any] = {"brief": state["brief"].model_dump()}
+        prompt_version: int | None = None
         if self._prompts is not None:
             rendered = self._prompts.render(self._name)
             system = rendered.text
+            prompt_version = rendered.version
             context.update(
                 prompt_name=rendered.name,
                 prompt_version=rendered.version,
@@ -100,11 +102,15 @@ class SpecialistWorker:
                 f"{out.recommendation[:140]}"
             ),
             round=state.get("debate_round", 0),
+            prompt_version=prompt_version,
         )
         from app.core.cost_tracking import current_cost
 
-        return {
+        update: StateUpdate = {
             "analyst_notes": [note],
             "cost_so_far": current_cost(),
             "transcript": [msg],
         }
+        if prompt_version is not None:
+            update["prompt_versions"] = {self._name: prompt_version}
+        return update
