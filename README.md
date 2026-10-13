@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-async%20API-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-supervisor--workers-1C3C3C)](https://github.com/langchain-ai/langgraph)
 [![CI](https://github.com/kanderson-ai-dev/langgraph-multiagent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/kanderson-ai-dev/langgraph-multiagent-orchestrator/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)](https://github.com/kanderson-ai-dev/langgraph-multiagent-orchestrator/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-91%25-brightgreen)](https://github.com/kanderson-ai-dev/langgraph-multiagent-orchestrator/actions/workflows/ci.yml)
 [![Ruff](https://img.shields.io/badge/linting-ruff-red)](https://github.com/astral-sh/ruff)
 [![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy--strict-blue)](https://mypy-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -71,7 +71,7 @@ the standard of a paid engagement, not a portfolio toy.
   (LLM budget vs. debate rounds) and adapts its actions accordingly.
 - 🏢 **Multi-tenant from day one.** `workspace_id` scopes every job, event
   and report — one tenant can never read another's work.
-- 🧪 **CI green with zero secrets.** 136 tests, 90% coverage on `app/`,
+- 🧪 **CI green with zero secrets.** 307 tests, 91% coverage on `app/`,
   `mypy --strict`, a browser E2E smoke test — all runnable offline via a
   deterministic `StubLLM` and fixture-based tools. `docker compose up` works
   with no credentials at all.
@@ -118,9 +118,69 @@ graph TD
 | Route | Surface |
 |---|---|
 | `/` | Minimalist public landing (Tailwind via CDN, no build step). |
-| `/console` | Operator console — brief submission, live SSE transcript with Supervisor dispatches and the Writer↔Reviewer debate, HITL review modal, per-role cost panel, sealed report with clickable sources and PDF download. |
+| `/console` | Operator console (bundler-free ES modules) — brief submission, live SSE transcript with Supervisor dispatches and the Writer↔Reviewer debate, guided HITL review modal, per-role cost panel, Prompt Registry tab, Performance & Cost tab, Audit tab, sealed report with clickable sources and PDF/MD/DOCX download. |
 
 ![Console — finished report with audit seal, PDF download and workspace costs](docs/screenshots/report-audit-badge.png)
+
+---
+
+## 🧬 Prompt Registry
+
+Prompts are versioned artifacts, not string literals buried in nodes.
+`prompts/<name>/vN.yaml` seeds load idempotently into a SQLite-backed
+registry that owns the lifecycle:
+
+```
+seed → draft → candidate ──ab-test──▶ promoted ──▶ retired
+                    │                    ▲
+                    └── metric gate (PROMPT_PROMOTION_EPSILON) or
+                        admin override (reason is audit-logged)
+```
+
+- **Provenance on every call**: each LLM generation carries
+  `prompt_name` / `prompt_version` / `prompt_sha256` in trace metadata —
+  a LangSmith/Langfuse trace answers "which template produced this".
+- **Metric-gated promotion**: `run_ab_eval` scores the candidate against
+  the champion on the golden dataset; promotion below the epsilon gate is
+  blocked unless an admin supplies an override reason.
+- **Tamper-evident lifecycle**: every mutation appends to the same
+  hash-chain family as job transcripts — prompt evolution is auditable.
+- **Console tab**: versions, diffs, candidate editor, A/B runs,
+  promote/rollback — all driven by `GET/POST /api/v1/prompts/*`.
+
+![Prompt Registry — versions, diff and promotion gate](docs/screenshots/console-prompt-registry.png)
+
+## 🔏 Audit & evidence sealing
+
+Two chains make "who said what, backed by what" cryptographic:
+
+- **Transcript chain** — every `AgentMessage` (dispatch, draft, verdict,
+  escalation, resume) is appended with a SHA-256 link to its predecessor;
+  the report carries the resulting `audit_root`.
+- **Evidence manifest** — every source the Researcher fetched is hashed
+  (`sha256` of normalized content) at gather time and sealed into the
+  chain. Report footnotes carry `#<sha[:12]>` so a citation can be traced
+  to the exact bytes that supported it.
+
+`GET /reports/{id}/audit` re-verifies the chain server-side; a tampered
+record flips `verified` to `false` (proven by test). `/evidence` exposes
+the sealed manifest.
+
+## 🛂 RBAC & workspaces
+
+Multi-tenancy is enforced by *role × workspace*:
+
+| Role | Can do |
+|---|---|
+| `admin` | Everything: members, API keys, prompt lifecycle, feedback export |
+| `member` | Submit/review jobs, read own workspace |
+| `viewer` | Read-only within the workspace |
+
+`POST /api/v1/workspaces` + `/members` + `/api-keys` are the admin
+surface; JWT sessions resolve `role` from the `members` table, and API
+keys carry their role inline. Cross-tenant probes return `404` — resource
+existence is not leaked. The dev-mode bootstrap keeps local ergonomics:
+with no `JWT_SECRET_KEY`, every request is a default-workspace admin.
 
 ---
 
@@ -141,7 +201,7 @@ metrics that matter in this domain.
 | Latency | Full job wall-clock, live path | p50 ≤ 90s / p95 ≤ 240s | **~105s to HITL/done observed** (was 150–670s before parallel search+scrape) — converged runs land near the p50 target; see Known limitations |
 | Cost | Per job (all roles, all rounds) | ≤ $0.08 | **$0.010–$0.104 observed** ✅ (upper end = full 3-round debate + fund) |
 | UI end-to-end | Browser E2E: real console → submit → SSE transcript → rendered report → clickable sources | runs in CI (Playwright) | **PASS** ✅ |
-| Test coverage | `pytest --cov=app` | ≥ 80% | **90%** ✅ |
+| Test coverage | `pytest --cov=app` | ≥ 80% | **91%** ✅ |
 | Static typing | `mypy --strict app/` | 0 errors | **0 errors** ✅ |
 
 ```bash
@@ -183,18 +243,29 @@ cost and 3× the calls of a single prompt.
 
 ![EDD scorecard — all gates PASS](docs/screenshots/edd-scorecard.png)
 
-### LangSmith experiment (real eval run)
+### Live experiments (LangSmith / Langfuse)
 
-The same dataset pushed through LangSmith experiments — per-case evaluator
-scores, including the `blocked-injection` adversarial case failing loudly in
-red exactly as designed:
+The same dataset pushed through a live provider — per-case evaluator
+scores, including the `blocked-injection` adversarial case failing loudly
+in red exactly as designed. The current live backend is **Langfuse**
+(`TRACING_PROVIDER=langfuse`; LangSmith's monthly quota ran out — see
+[`docs/eval/why-langfuse.md`](docs/eval/why-langfuse.md)):
 
 ![LangSmith experiment summary](docs/screenshots/langsmith-experiment-summary.png)
 ![LangSmith experiment detail](docs/screenshots/langsmith-experiment-detail.png)
 
+Live surfaces publish **measured results only** — there is deliberately
+no stub fallback for `--langsmith-live`/`--langfuse-live` (see
+[ADR 0004](docs/adr/0004-live-scorecard-no-offline.md)). That is why a
+live run honestly shows non-converged debates and `awaiting_review`
+escalations where the offline gate shows green: the stub proves
+determinism, the live run proves quality.
+
 ---
 
 ## 🔌 API
+
+**Orchestration** (all workspace-scoped):
 
 | Endpoint | Purpose |
 |---|---|
@@ -203,11 +274,30 @@ red exactly as designed:
 | `GET /api/v1/orchestration/reports` | List jobs (workspace-scoped) |
 | `GET /api/v1/orchestration/reports/{id}` | Poll status, team, cost and result |
 | `GET /api/v1/orchestration/reports/{id}/stream` | Live progress via SSE (per-node events, HITL interrupts) |
-| `POST /api/v1/orchestration/reports/{id}/review` | HITL decision for `awaiting_review` jobs (`approve` / `edit` / `reject` / `fund`) |
-| `GET /api/v1/orchestration/reports/{id}/report.pdf` | Download the final report as a PDF |
-| `GET /api/v1/orchestration/reports/{id}/audit` | Hash-chained audit trail for a finished job |
-| `GET /api/v1/dashboard/summary` | Workspace cost/token/latency aggregates |
-| `GET /health` `/health/ready` `/metrics` | Liveness, readiness, Prometheus exposition |
+| `POST /api/v1/orchestration/reports/{id}/review` | HITL decision — the server publishes `allowed_actions` per pause and rejects off-menu actions |
+| `GET /api/v1/orchestration/reports/{id}/report.{pdf,md,docx}` | Download the final report |
+| `GET /api/v1/orchestration/reports/{id}/audit` | Hash-chained audit trail + server-side verification |
+| `GET /api/v1/orchestration/reports/{id}/evidence` | Sealed evidence manifest (per-source SHA-256) |
+
+**Prompt Registry** (lifecycle mutations are `admin`-only):
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/prompts` `/{name}` `/{name}/diff` | Versions, detail, rendered diff |
+| `POST /api/v1/prompts/{name}/candidates` | Register a candidate version |
+| `POST /api/v1/prompts/{name}/ab-test` `/promote` `/rollback` | Measured A/B → gated promotion / instant rollback |
+| `GET /api/v1/prompts/ab-runs/{run_id}` `/audit` | A/B results, lifecycle audit chain |
+
+**Workspaces, ops & public:**
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/v1/workspaces` `/{id}/members` `/{id}/api-keys` | Workspace administration (admin-only) |
+| `GET /api/v1/dashboard/summary` `/performance` | Workspace cost/token/latency + p50/p95 and human-vs-agent comparison |
+| `POST /api/v1/feedback` · `GET /api/v1/feedback` `/export` | Report feedback queue (write: any member; read/export: admin) |
+| `GET /api/v1/config/ui` | White-label config the frontends apply (`UI_*` envs) |
+| `GET /status` · `GET /eval/latest` | Public status page + latest published scorecard |
+| `GET /health/live` `/health/ready` `/api/v1/health` `/metrics` | Probes + Prometheus exposition |
 
 ![Auto-generated OpenAPI surface](docs/screenshots/swagger-docs.png)
 
@@ -248,8 +338,13 @@ curl -s http://localhost:8000/api/v1/orchestration/reports/<job_id>/audit
 - **structlog** JSON pipeline, correlated by `job_id`, with automatic
   redaction of `*_key` / `*_token` / `*_password` / `authorization` /
   `*_secret` fields.
-- **Prometheus** metrics for job outcomes, durations, tokens by role, and
-  per-job cost.
+- **Prometheus** metrics for job outcomes, durations, tokens by role,
+  per-node latency histograms (`node_seconds`) and per-job cost —
+  `docs/observability/grafana-dashboard.json` imports as-is.
+- **`GET /api/v1/dashboard/performance`**: measured p50/p95 per node and
+  per job, cost per job against a versioned model price table, and a
+  human-vs-agent comparison (`HUMAN_HOURS_PER_REPORT`,
+  `HUMAN_HOURLY_USD`) — the console renders it in the Performance tab.
 - **Per-job cost accounting**: a context-scoped `UsageTracker` rolls every
   LLM call into `job.cost_usd`, split by agent role in the console.
 - **LangSmith**: set `LANGCHAIN_API_KEY` + `LANGCHAIN_TRACING_V2=true` and
@@ -273,12 +368,14 @@ curl -s http://localhost:8000/api/v1/orchestration/reports/<job_id>/audit
 
 Guardrail-first design (hostile briefs are rejected before any paid call),
 scraped content treated as data never instructions (OWASP LLM01 — injection
-fixtures tested), JWT auth with generic 401s when configured, rate limiting,
-security headers middleware, robots.txt-compliant scraper with delays and
-size caps, `workspace_id` isolation on every route, and secret hygiene
+fixtures tested), JWT auth + role-based access control (admin/member/viewer)
+with generic 401s, rate limiting (in-memory or Redis), security headers
+middleware, robots.txt-compliant scraper with delays and size caps,
+`workspace_id` isolation on every route (cross-tenant probes → `404`),
+admin-only prompt lifecycle with an audit-chained trail, and secret hygiene
 enforced by `SecretStr`, redacted logs, `.gitignore`/`.dockerignore`
-coverage, `gitleaks` + `pip-audit` in CI. Full mapping:
-[`SECURITY.md`](SECURITY.md).
+coverage, `gitleaks` + `pip-audit` + SBOM/CodeQL/Dependabot in CI. Full
+mapping: [`SECURITY.md`](SECURITY.md).
 
 ---
 
@@ -316,11 +413,22 @@ named volume; `.env` is read at runtime — no secrets are baked in.
 | `TRACING_PROVIDER` | no | — | `langsmith` \| `langfuse` \| `none` (default) |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | no | ✅ | Langfuse tracing + experiments |
 | `LANGFUSE_BASE_URL` | no | — | Langfuse region/self-host (default cloud) |
-| `JWT_SECRET_KEY` / `ADMIN_PASSWORD_HASH` | no | ✅ | Enables JWT auth (else open local dev) |
+| `JWT_SECRET_KEY` / `ADMIN_PASSWORD_HASH` / `ADMIN_USERNAME` | no | ✅ | Enables JWT auth (else open local dev) |
 | `MAX_DEBATE_ROUNDS` | no | — | Writer↔Reviewer cap before escalation |
 | `MAX_WORKER_DISPATCHES` | no | — | Per-worker dispatch cap (anti-loop guard) |
 | `MAX_SUB_QUESTIONS` | no | — | Researcher query fan-out bound |
 | `DEFAULT_JOB_BUDGET_USD` | no | — | Global fallback budget cap per job |
+| `REVIEWER_MODEL` / `LLM_MAX_TOKENS` | no | — | Model override per role / output cap per call |
+| `RESEARCH_SCRAPE_TOP_K` | no | — | Sources scraped per sub-question |
+| `REVIEW_EARLY_EXIT_SCORE` / `REVIEWER_CITATION_SHORTCIRCUIT` | no | — | Skip/defer review work when deterministically decidable |
+| `CACHE_ENABLED` / `CACHE_TTL_HOURS` | no | — | Search/scrape response cache (SQLite, per workspace+day) |
+| `REDIS_URL` | no | — | Enables Redis-backed rate limiter + event bus (multi-replica) |
+| `RATE_LIMIT_PER_MINUTE` | no | — | Sliding-window request cap per workspace |
+| `HITL_EXPIRY_HOURS` / `HITL_SWEEP_INTERVAL_SECONDS` | no | — | Stale `awaiting_review` expiry + sweep cadence |
+| `HUMAN_HOURS_PER_REPORT` / `HUMAN_HOURLY_USD` | no | — | Baseline for the human-vs-agent performance panel |
+| `PROMPT_PROMOTION_EPSILON` | no | — | Minimum measured delta for prompt promotion |
+| `JUDGE_MODEL` | no | — | Model for the eval-time LLM judge |
+| `UI_PRODUCT_NAME` / `UI_ACCENT_COLOR` / `UI_LOGO_URL` | no | — | White-label config served at `/api/v1/config/ui` |
 
 Never commit secrets. See [`.env.example`](.env.example) for the full,
 commented template.
@@ -332,19 +440,32 @@ app/
 ├── framework/         # domain-agnostic Supervisor–Workers primitives
 │                      # (worker protocol, LLM supervisor router, bounded
 │                      #  debate loop, worker registry)
-├── graph/             # report-generation assembly: state, nodes
+├── graph/             # report-generation assembly: state, nodes/
 │                      # (researcher/writer/reviewer/specialists), teams,
-│                      # prompts, guardrails, citations, report_assembler
-├── api/v1/routes/     # auth, orchestration, dashboard, health
-├── core/              # config, security, logging, metrics, cost tracking
+│                      # prompts, guardrails, citations, report_assembler,
+│                      # hitl (guided review actions)
+├── api/v1/routes/     # auth, orchestration, prompts, workspaces,
+│                      # dashboard, feedback, status, health
+├── core/              # config, security, logging, metrics, cost_tracking,
+│                      # rate_limit + event_bus protocols, dependencies
 └── services/          # llm_client (real + StubLLM), search_client,
                        # scraper_client, job_store, usage_store,
-                       # job_runner (SSE), audit (hash chain)
-evaluation/            # EDD dataset, evaluators, run_eval, scorecards
+                       # prompt_registry, feedback_store, cache_store,
+                       # workspace_store, tracing, job_runner (SSE),
+                       # audit (hash chain), exports (pdf/md/docx)
+evaluation/            # EDD dataset, evaluators, run_eval, scorecards,
+                       # cassettes + record_cassettes, latency_bench,
+                       # trend history, langsmith/langfuse publishers
 frontend/              # `/` landing (Tailwind CDN) + `/console` operator UI
-tests/                 # 136 tests — offline by default, incl. browser E2E
-docs/screenshots/      # real captures referenced by this README
-scripts/               # record_demo.py (GIF), capture_screenshots.py
+                       # (ES modules: views/{jobs,report,review,prompts,
+                       #  performance,audit}.js)
+tests/                 # 307 tests — offline by default, incl. browser E2E
+docs/                  # adr/, eval/, observability/ (Grafana), ui-qa/,
+                       # functional-qa/, screenshots/
+scripts/               # record_demo.py (GIF), capture_screenshots.py,
+                       # export_feedback.py
+.github/workflows/     # ci.yml (py3.11/3.12 matrix + docker smoke + SBOM),
+                       # codeql.yml, live-eval.yml, dependabot.yml
 ```
 
 ## 🧪 Verification
@@ -352,23 +473,30 @@ scripts/               # record_demo.py (GIF), capture_screenshots.py
 ```bash
 ruff check .                                            # lint
 mypy --strict app/                                      # types (0 errors)
-pytest -v --cov=app                                     # 136 tests, offline, 90%
+pytest -v --cov=app                                     # 307 tests, offline, 91%
 uv run --with playwright pytest tests/test_frontend_e2e.py  # browser E2E
 uv run python -m evaluation.run_eval                    # EDD quality gate
+uv run python -m evaluation.latency_bench               # p50/p95 bench (live creds)
+uv run pip-audit && gitleaks detect                     # supply chain + secrets
 ```
 
-CI (`.github/workflows/ci.yml`): ruff → mypy strict → pytest+coverage → EDD
-gate → browser E2E → pip-audit → gitleaks, on `pull_request` with
-`contents: read`.
+CI (`.github/workflows/ci.yml`, Python **3.11 + 3.12** matrix): `uv sync
+--frozen` → ruff → mypy strict → pytest+coverage → EDD gate → Playwright
+browser E2E → pip-audit → gitleaks → Docker build + `/api/v1/health`
+container smoke → CycloneDX SBOM generation + validation. All actions are
+SHA-pinned; CodeQL runs weekly, Dependabot opens grouped updates, and the
+credential-gated `live-eval.yml` publishes scorecards/trends as artifacts.
+Versioned QA checklists live in `docs/ui-qa/` + `docs/functional-qa/`.
 
 ## 🛠️ Stack
 
-Python 3.13 · FastAPI · LangGraph (dynamic routing, `Send()` fan-out,
+Python 3.11+ · FastAPI · LangGraph (dynamic routing, `Send()` fan-out,
 `interrupt()` HITL, `AsyncSqliteSaver`) · LangChain + `langchain-openai` ·
-Pydantic v2 / pydantic-settings · httpx + tenacity · BeautifulSoup4/lxml +
-pypdf/pdfplumber · aiosqlite · structlog ·
-prometheus-fastapi-instrumentator · PyJWT · fpdf2 · pytest/respx · ruff ·
-mypy --strict · Playwright · uv · Docker.
+Pydantic v2 / pydantic-settings · httpx (HTTP/2 pooled) + tenacity ·
+BeautifulSoup4/lxml + pypdf/pdfplumber · aiosqlite · structlog ·
+prometheus-fastapi-instrumentator · PyJWT · fpdf2 + python-docx ·
+redis/fakeredis (optional scale-out) · Langfuse/LangSmith tracing ·
+pytest/respx · ruff · mypy --strict · Playwright · uv · Docker.
 
 ## 🧮 Horizontal scale (optional Redis backends)
 
@@ -395,6 +523,11 @@ protocol with a Postgres implementation (SQLite today is single-node).
 
 ## Known limitations & next steps
 
+- **Live debate convergence is below target**: the live Langfuse
+  experiment showed the Reviewer exhausting rounds on some briefs
+  (`awaiting_review` instead of converged) — the offline stub cannot
+  reproduce this. Next step is prompt iteration on the writer/reviewer
+  pair via the registry's A/B gate, not a routing change.
 - **Live latency sits near (not under) the p50 target**: parallel search +
   bounded-concurrency scraping brought wall-clock from 150–670s down to
   ~105s for a full 3-round debate job. The remaining serial cost is the
@@ -402,11 +535,13 @@ protocol with a Postgres implementation (SQLite today is single-node).
   search latency; a paid provider (Tavily) would shave the research phase
   further.
 - The SQLite `JobStore` is single-node; the next step is a `JobStore`
-  protocol + Postgres implementation for true multi-replica state.
-- `workspace_id` isolation exists end-to-end, but there is no workspace
-  management surface — tenants are implicit, not administrable.
-- LLM-as-judge and LangSmith experiments require live credentials; the
-  offline scorecard intentionally validates the deterministic pipeline.
+  protocol + Postgres implementation for true multi-replica state (the
+  rate limiter and event bus already have Redis backends — see ADR 0003).
+- LLM-as-judge and live experiments require live credentials; the
+  offline scorecard intentionally validates the deterministic pipeline
+  (ADR 0004).
+- The DOCX exporter renders structure faithfully but minimally (headings,
+  paragraphs, footnotes) — no corporate templating.
 
 ---
 

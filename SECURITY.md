@@ -15,8 +15,40 @@ content** gathered by the Researcher agent.
 | SSRF | Researcher fetching arbitrary URLs | Scheme allowlist (`http`/`https`), private/loopback/link-local IP literals rejected (`app/services/scraper_client.py`) |
 | Credential leakage | Logs, errors, config | `SecretStr` config, `structlog` field redaction, generic 401s, no secrets in query strings |
 | Auth bypass | Job/report endpoints | JWT when `JWT_SECRET_KEY` is set; all routes scoped by `workspace_id` (multi-tenant isolation) |
-| Rate abuse | `/auth/login`, job submission | Sliding-window rate limiter (`app/core/rate_limit.py`) |
-| Dependency / supply chain | CI | `pip-audit`, `gitleaks` in GitHub Actions; workflow uses `pull_request` + `contents: read` |
+| Rate abuse | `/auth/login`, job submission | Sliding-window `RateLimiter` protocol — in-memory default, Redis backend for multi-replica (`app/core/rate_limit.py`) |
+| Dependency / supply chain | CI | `pip-audit`, `gitleaks`, CycloneDX SBOM + validation, CodeQL, Dependabot, SHA-pinned GitHub Actions |
+| Prompt tampering | Prompt Registry templates | Lifecycle mutations are **admin-only** (RBAC) and every mutation appends to a hash-chained audit log — tampering is detectable (`PromptStore.audit_log`) |
+| Promotion abuse | Registry `promote`/`rollback` | Metric-gated promotion (`run_ab_eval` + `PROMPT_PROMOTION_EPSILON`); admin overrides require an explicit `reason` that lands in the audit chain |
+| Malicious candidates | `POST /prompts/{name}/candidates` | Candidate registration is admin-gated; a candidate is never promoted without measured eval results — supply ends in an auditable `draft`, never silently live |
+| Report tampering | `GET /reports/{id}/audit`, `/evidence` | Transcript entries and the evidence manifest (per-source SHA-256) are sealed into the job's hash chain — `verify` re-computes the chain and flags divergence |
+
+## RBAC
+
+- **Roles:** `admin` (full control, including workspace membership and
+  prompt lifecycle), `member` (submit/review jobs, read within the
+  workspace), `viewer` (read-only).
+- JWT sessions resolve `role` from the `members` table; API keys carry
+  their own role from `api_keys`. The platform-admin username
+  (`ADMIN_USERNAME`) bootstraps `admin` even before any membership row
+  exists.
+- Every route is scoped by `workspace_id`; a member of workspace A gets
+  `404` (not `403`) on workspace B's resources — existence is not leaked.
+- Registry lifecycle, workspace membership, API-key issuance and feedback
+  export are admin-only; job submission/review require `member` or
+  `admin`; reads accept `viewer`.
+
+## Evaluation cassette policy
+
+Recorded live eval runs (`evaluation/cassettes/*.json`) contain real
+scraped HTML and LLM payloads. Before a cassette is committed:
+
+1. It is generated with `record_live.py` — a dedicated script, never
+   hand-edited.
+2. `gitleaks detect` runs over the diff — caught once already (an
+   Application Insights `instrumentationkey` embedded in third-party
+   HTML, exempted via `.gitleaksignore` as a verified non-secret).
+3. A cassette is treated as *untrusted input* in replay mode — the same
+   sanitization that guards live scraping applies to recorded content.
 
 ## OWASP LLM Top 10 mapping
 
