@@ -187,10 +187,15 @@ def _git_sha() -> str:
 
 
 def _run_name(registry: PromptRegistry) -> str:
-    """``<writer@version>-<git sha>-<date>`` — comparable across A/B runs."""
+    """``<writer@version>-<git sha>-<date>-<HHMM>`` — unique per run.
+
+    Same-named runs merge into one Langfuse experiment view (stale errors
+    from failed runs would linger), so the timestamp keeps each execution
+    its own row while remaining A/B-comparable by prefix.
+    """
     version = registry.get("writer").version
-    date = datetime.now(UTC).strftime("%Y-%m-%d")
-    return f"writer-v{version}-{_git_sha()}-{date}"
+    stamp = datetime.now(UTC).strftime("%Y-%m-%d-%H%M")
+    return f"writer-v{version}-{_git_sha()}-{stamp}"
 
 
 def run_langfuse_experiment(*, live: bool = False) -> str | None:

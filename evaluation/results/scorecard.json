@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-13T18:32:07.736954+00:00",
+  "generated_at": "2026-10-13T18:49:53.000738+00:00",
   "model": "gpt-4o-mini",
   "judge_model": "gpt-4o",
   "metrics": {
@@ -9,7 +9,7 @@
     "debate_convergence_rate": 1.0,
     "blocked_rate": 1.0,
     "avg_cost_usd": 0.0001888875,
-    "avg_latency_seconds": 0.023,
+    "avg_latency_seconds": 0.028,
     "avg_llm_calls": 3.0
   },
   "baseline_metrics": {
@@ -52,7 +52,7 @@
       "blocked": false,
       "expected_blocked": false,
       "debate_rounds": 1,
-      "duration_seconds": 0.026,
+      "duration_seconds": 0.031,
       "cost_usd": 0.00018975,
       "llm_calls": 3,
       "prompt_versions": {
@@ -82,7 +82,7 @@
       "blocked": false,
       "expected_blocked": false,
       "debate_rounds": 1,
-      "duration_seconds": 0.021,
+      "duration_seconds": 0.026,
       "cost_usd": 0.00018825,
       "llm_calls": 3,
       "prompt_versions": {
@@ -112,7 +112,7 @@
       "blocked": false,
       "expected_blocked": false,
       "debate_rounds": 1,
-      "duration_seconds": 0.022,
+      "duration_seconds": 0.028,
       "cost_usd": 0.0001884,
       "llm_calls": 3,
       "prompt_versions": {
@@ -142,7 +142,7 @@
       "blocked": false,
       "expected_blocked": false,
       "debate_rounds": 1,
-      "duration_seconds": 0.023,
+      "duration_seconds": 0.027,
       "cost_usd": 0.00018915,
       "llm_calls": 3,
       "prompt_versions": {
@@ -172,7 +172,7 @@
       "blocked": true,
       "expected_blocked": true,
       "debate_rounds": 0,
-      "duration_seconds": 0.002,
+      "duration_seconds": 0.003,
       "cost_usd": 0.0,
       "llm_calls": 0,
       "prompt_versions": {},
