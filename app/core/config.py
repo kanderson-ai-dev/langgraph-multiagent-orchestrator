@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # LLM
     openai_api_key: SecretStr | None = None
     chat_model_name: str = "gpt-4o-mini"
+    # LLM-as-judge: deliberately defaults to a *different* model family than
+    # the generator so the evaluator isn't the same checkpoint grading itself.
+    judge_model: str = "gpt-4o"
 
     # Web search
     search_provider: SearchProvider = "auto"

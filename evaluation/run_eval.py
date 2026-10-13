@@ -34,6 +34,12 @@ from app.services.prompt_eval import (
 from app.services.prompt_registry import PromptRegistry, PromptRegistryError
 from evaluation.baseline import aggregate_baseline, run_baseline_case
 from evaluation.dataset import DATASET, EvalCase
+from evaluation.trend import (
+    append_history,
+    build_history_row,
+    read_history,
+    render_trend,
+)
 
 RESULTS_DIR = Path(__file__).parent / "results"
 SCORECARD_PATH = RESULTS_DIR / "scorecard.json"
@@ -75,10 +81,14 @@ def build_scorecard(
     results: list[dict[str, Any]],
     prompt_versions: dict[str, int],
     overrides: dict[str, int],
+    settings: Settings,
+    mode: str,
 ) -> dict[str, Any]:
     """The versioned scorecard payload — pipeline and baseline side-by-side."""
     return {
         "generated_at": datetime.now(UTC).isoformat(),
+        "model": settings.chat_model_name,
+        "judge_model": settings.judge_model,
         "metrics": metrics,
         "baseline_metrics": baseline,
         "thresholds": THRESHOLDS,
@@ -86,48 +96,8 @@ def build_scorecard(
         "prompt_versions": prompt_versions,
         "prompt_overrides": overrides,
         "cases": results,
-        "mode": "offline (stub LLM + fixture tools)",
+        "mode": mode,
     }
-
-
-def _write_trend(
-    metrics: dict[str, float],
-    baseline: dict[str, float],
-    results: list[dict[str, Any]],
-) -> None:
-    def _f(v: float, digits: int = 3) -> str:
-        return f"{v:.{digits}f}"
-
-    lines = [
-        "# EDD Trend History",
-        "",
-        "| Run (UTC) | citation_support | rubric_avg | convergence | blocked "
-        "| base_support | base_rubric | base_cost_usd |",
-        "|---|---|---|---|---|---|---|---|",
-        (
-            f"| {datetime.now(UTC).isoformat()} | "
-            f"{_f(metrics['citation_support_rate'])} | "
-            f"{_f(metrics['rubric_score_avg'], 2)} | "
-            f"{_f(metrics['debate_convergence_rate'])} | "
-            f"{_f(metrics['blocked_rate'])} | "
-            f"{_f(baseline['citation_support_rate'])} | "
-            f"{_f(baseline['rubric_score_avg'], 2)} | "
-            f"{baseline['avg_cost_usd']:.6f} |"
-        ),
-        "",
-        "## Latest case results",
-        "",
-    ]
-    for r in results:
-        b = r["baseline"]
-        lines.append(
-            f"- `{r['case_id']}` — status={r['status']}, "
-            f"support={r['citation_support']:.2f}, score={r['rubric_score']:.1f}, "
-            f"rounds={r['debate_rounds']}, cost=${r['cost_usd']:.6f} "
-            f"| baseline: support={b['citation_support']:.2f}, "
-            f"score={b['rubric_score']:.1f}, cost=${b['cost_usd']:.6f}"
-        )
-    TREND_PATH.write_text("\n".join(lines), encoding="utf-8")
 
 
 def _parse_overrides(raw: str) -> dict[str, int]:
@@ -202,6 +172,7 @@ async def _main() -> int:
                 return 2
         registry = registry.with_overrides(overrides)
 
+    mode = "offline (stub LLM + fixture tools)"
     results = [await _run_case(c, settings, registry) for c in DATASET]
     metrics = aggregate_metrics(results)
     baseline = aggregate_baseline(results)
@@ -210,14 +181,25 @@ async def _main() -> int:
     prompt_versions: dict[str, int] = {}
     for r in results:
         prompt_versions.update(r.get("prompt_versions", {}))
+    # The judge is a versioned registry prompt too — record what scored.
+    prompt_versions["judge"] = registry.render("judge").version
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     scorecard = build_scorecard(
-        metrics, baseline, gates, results, prompt_versions, overrides
+        metrics, baseline, gates, results, prompt_versions, overrides,
+        settings, mode,
     )
     SCORECARD_PATH.write_text(json.dumps(scorecard, indent=2), encoding="utf-8")
+
+    # Append-only trend history — every run is preserved.
+    append_history(
+        build_history_row(
+            metrics=metrics, baseline=baseline, results=results,
+            prompt_versions=prompt_versions, settings=settings, mode=mode,
+        )
+    )
     if args.report:
-        _write_trend(metrics, baseline, results)
+        render_trend(read_history(), latest_results=results)
 
     if args.langsmith:
         from evaluation.langsmith_eval import run_langsmith_experiment

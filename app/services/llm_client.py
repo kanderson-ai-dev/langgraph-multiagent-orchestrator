@@ -36,11 +36,11 @@ class StructuredLLM(Protocol):
 class OpenAIStructuredLLM:
     """``StructuredLLM`` backed by langchain-openai structured output."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, model: str | None = None) -> None:
         from langchain_openai import ChatOpenAI
 
         self._model = ChatOpenAI(
-            model=settings.chat_model_name,
+            model=model or settings.chat_model_name,
             api_key=settings.openai_api_key,
             # Transient 429/5xx retry with exponential backoff — parallel jobs
             # can briefly saturate the org TPM limit mid-run.
@@ -118,4 +118,15 @@ def build_llm(settings: Settings) -> StructuredLLM:
     """Factory: real OpenAI when a key exists, deterministic stub otherwise."""
     if settings.openai_api_key is not None:
         return OpenAIStructuredLLM(settings)
+    return StubLLM()
+
+
+def build_judge_llm(settings: Settings) -> StructuredLLM:
+    """Factory for the LLM-as-judge — a different model than the generator.
+
+    Falls back to the deterministic stub offline; the eval registers a
+    ``JudgeOutput`` builder on it.
+    """
+    if settings.openai_api_key is not None:
+        return OpenAIStructuredLLM(settings, model=settings.judge_model)
     return StubLLM()

@@ -81,10 +81,13 @@ class ScraperClient:
                     candidate = urllib.robotparser.RobotFileParser()
                     candidate.set_url(f"{origin}/robots.txt")
                     try:
-                        await asyncio.wait_for(
-                            asyncio.to_thread(candidate.read),
-                            timeout=self._settings.scrape_timeout_seconds,
-                        )
+                        # Fetch through _fetch (httpx): same UA, timeout and
+                        # redirect handling as page fetches — and visible to
+                        # VCR cassettes for deterministic offline replay.
+                        resp = await self._fetch(f"{origin}/robots.txt")
+                        if resp.status_code >= 400:
+                            raise ScrapeError(f"HTTP {resp.status_code}")
+                        candidate.parse(resp.text.splitlines())
                     except Exception:  # unreadable robots.txt → allow, logged
                         self._robots[origin] = None
                         logger.info("robots_txt_unreadable", origin=origin)

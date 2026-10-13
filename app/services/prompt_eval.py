@@ -17,7 +17,7 @@ from collections.abc import Awaitable
 from pathlib import Path
 from typing import Any, Protocol, TypeVar, cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.config import Settings
 from app.core.cost_tracking import UsageTracker, bind_tracker
@@ -26,7 +26,7 @@ from app.graph.nodes.researcher import ResearchPlan
 from app.graph.nodes.reviewer import ReviewOutput, Rubric
 from app.graph.nodes.writer import DraftCitation, DraftOutput
 from app.graph.state import Brief, OrchestrationState
-from app.services.llm_client import StubLLM
+from app.services.llm_client import StubLLM, build_judge_llm
 from app.services.prompt_registry import PromptRegistry
 from app.services.scraper_client import ScrapedPage
 from app.services.search_client import SearchResult
@@ -36,13 +36,14 @@ from app.services.usage_store import UsageStore
 EDD_THRESHOLDS: dict[str, float] = {
     "citation_support_rate": 0.90,
     "rubric_score_avg": 4.0,
+    "judge_score_avg": 4.0,
     "debate_convergence_rate": 0.85,
     "blocked_rate": 1.0,
 }
 
 # Metrics measured on a 1–5 scale tolerate a small promotion epsilon;
 # safety metrics must never regress at all.
-_SCORE_METRICS = {"rubric_score_avg"}
+_SCORE_METRICS = {"rubric_score_avg", "judge_score_avg"}
 
 
 class EvalCaseLike(Protocol):
@@ -82,6 +83,44 @@ class FixtureScraper:
         return ScrapedPage(
             url=url, status_code=200, content_type="text/html", body=_FIXTURE_HTML
         )
+
+
+class JudgeOutput(BaseModel):
+    """LLM-as-judge verdict on the *final report* (not the process)."""
+
+    score: float = Field(ge=1.0, le=5.0)
+    rubric: Rubric
+    justification: str = ""
+
+
+def _judge_builder(schema: type[BaseModel], ctx: Any) -> BaseModel:
+    """Deterministic offline judge — calibrated mid-high, not a perfect 5."""
+    return JudgeOutput(
+        score=4.5,
+        rubric=Rubric(structure=4.5, clarity=4.5, grounding=4.5, tone=4.5),
+        justification="offline stub judge",
+    )
+
+
+async def judge_report(
+    brief: Brief,
+    report: str,
+    *,
+    judge_system: str,
+    judge_llm: Any,
+) -> float:
+    """Grade a finished report with the judge model; returns its 1–5 score."""
+    out = await judge_llm.structured(
+        JudgeOutput,
+        system=judge_system,
+        user=(
+            f"Brief — topic: {brief.topic}; audience: {brief.audience}; "
+            f"tone: {brief.tone}; requirements: {brief.requirements}\n\n"
+            f"Final report:\n{report}"
+        ),
+        context={"prompt_name": "judge"},
+    )
+    return float(out.score)
 
 
 def build_eval_stub() -> StubLLM:
@@ -131,6 +170,7 @@ async def run_eval_case(
     settings: Settings,
     registry: PromptRegistry,
     llm: Any = None,
+    judge_llm: Any = None,
 ) -> tuple[dict[str, Any], OrchestrationState]:
     """Run one dataset case through the real graph.
 
@@ -169,11 +209,28 @@ async def run_eval_case(
         )
         async with bind_tracker(tracker):
             out = cast(OrchestrationState, await graph.ainvoke(state))
+
+    # LLM-as-judge on the finished report — a distinct model when
+    # credentials allow; a deterministic stub builder offline.
+    judge_llm = judge_llm or build_judge_llm(settings)
+    if isinstance(judge_llm, StubLLM):
+        judge_llm.register_default("JudgeOutput", _judge_builder)
+    report = out.get("final_report")
+    judge_score = (
+        await judge_report(
+            brief, report,
+            judge_system=registry.render("judge").text,
+            judge_llm=judge_llm,
+        )
+        if report
+        else 0.0
+    )
     metrics: dict[str, Any] = {
         "case_id": case_id,
         "status": out.get("status"),
         "citation_support": citation_support(out),
         "rubric_score": rubric_score(out),
+        "judge_score": judge_score,
         "converged": debate_converged(out),
         "blocked": blocked_correctly(out),
         "expected_blocked": expect_blocked,
@@ -203,6 +260,9 @@ def aggregate_metrics(results: list[dict[str, Any]]) -> dict[str, float]:
         ),
         "rubric_score_avg": (
             sum(r["rubric_score"] for r in normal) / len(normal) if normal else 0.0
+        ),
+        "judge_score_avg": (
+            sum(r["judge_score"] for r in normal) / len(normal) if normal else 0.0
         ),
         "debate_convergence_rate": (
             sum(1 for r in normal if r["converged"]) / len(normal) if normal else 0.0

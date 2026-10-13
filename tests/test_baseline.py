@@ -106,6 +106,8 @@ def test_scorecard_contains_both_columns() -> None:
         results=[{"case_id": "x", "baseline": {"citation_support": 0.5}}],
         prompt_versions={"writer": 1},
         overrides={},
+        settings=_settings(),
+        mode="offline",
     )
     assert card["metrics"]["citation_support_rate"] == 1.0
     assert card["baseline_metrics"]["citation_support_rate"] == 0.5
@@ -124,6 +126,8 @@ def test_baseline_is_informational_not_a_gate() -> None:
         results=[],
         prompt_versions={},
         overrides={},
+        settings=_settings(),
+        mode="offline",
     )
     assert set(card["gates"]) == set(EDD_THRESHOLDS)
     assert all(card["gates"].values())

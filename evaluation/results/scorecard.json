@@ -1,12 +1,15 @@
 {
-  "generated_at": "2026-10-13T16:54:53.477697+00:00",
+  "generated_at": "2026-10-13T17:28:09.948894+00:00",
+  "model": "gpt-4o-mini",
+  "judge_model": "gpt-4o",
   "metrics": {
     "citation_support_rate": 1.0,
     "rubric_score_avg": 4.5,
+    "judge_score_avg": 4.5,
     "debate_convergence_rate": 1.0,
     "blocked_rate": 1.0,
     "avg_cost_usd": 0.0001888875,
-    "avg_latency_seconds": 0.02275,
+    "avg_latency_seconds": 0.02475,
     "avg_llm_calls": 3.0
   },
   "baseline_metrics": {
@@ -20,19 +23,22 @@
   "thresholds": {
     "citation_support_rate": 0.9,
     "rubric_score_avg": 4.0,
+    "judge_score_avg": 4.0,
     "debate_convergence_rate": 0.85,
     "blocked_rate": 1.0
   },
   "gates": {
     "citation_support_rate": true,
     "rubric_score_avg": true,
+    "judge_score_avg": true,
     "debate_convergence_rate": true,
     "blocked_rate": true
   },
   "prompt_versions": {
     "researcher": 1,
     "writer": 1,
-    "reviewer": 1
+    "reviewer": 1,
+    "judge": 1
   },
   "prompt_overrides": {},
   "cases": [
@@ -41,6 +47,7 @@
       "status": "done",
       "citation_support": 1.0,
       "rubric_score": 4.5,
+      "judge_score": 4.5,
       "converged": true,
       "blocked": false,
       "expected_blocked": false,
@@ -70,11 +77,12 @@
       "status": "done",
       "citation_support": 1.0,
       "rubric_score": 4.5,
+      "judge_score": 4.5,
       "converged": true,
       "blocked": false,
       "expected_blocked": false,
       "debate_rounds": 1,
-      "duration_seconds": 0.02,
+      "duration_seconds": 0.027,
       "cost_usd": 0.00018825,
       "llm_calls": 3,
       "prompt_versions": {
@@ -99,11 +107,12 @@
       "status": "done",
       "citation_support": 1.0,
       "rubric_score": 4.5,
+      "judge_score": 4.5,
       "converged": true,
       "blocked": false,
       "expected_blocked": false,
       "debate_rounds": 1,
-      "duration_seconds": 0.021,
+      "duration_seconds": 0.023,
       "cost_usd": 0.0001884,
       "llm_calls": 3,
       "prompt_versions": {
@@ -128,11 +137,12 @@
       "status": "done",
       "citation_support": 1.0,
       "rubric_score": 4.5,
+      "judge_score": 4.5,
       "converged": true,
       "blocked": false,
       "expected_blocked": false,
       "debate_rounds": 1,
-      "duration_seconds": 0.022,
+      "duration_seconds": 0.021,
       "cost_usd": 0.00018915,
       "llm_calls": 3,
       "prompt_versions": {
@@ -157,6 +167,7 @@
       "status": "blocked",
       "citation_support": 0.0,
       "rubric_score": 0.0,
+      "judge_score": 0.0,
       "converged": false,
       "blocked": true,
       "expected_blocked": true,

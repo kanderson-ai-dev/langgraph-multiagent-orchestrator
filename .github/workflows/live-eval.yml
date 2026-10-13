@@ -1,0 +1,60 @@
+name: live-eval
+
+# Live EDD run — real model, real credentials. NEVER on pull_request:
+# it costs money and needs secrets, so it is manual or scheduled only.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"  # Mondays 06:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  live-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SEARCH_API_KEY: ${{ secrets.SEARCH_API_KEY }}
+      LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
+      LANGCHAIN_TRACING_V2: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # Live eval is informational: failures surface as a failing workflow
+      # run plus artifacts — they never block PRs.
+      - name: Run live evaluation
+        run: uv run python -m evaluation.run_eval --report --langsmith
+        continue-on-error: false
+
+      - name: Upload scorecard + trend artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-eval-scorecard
+          path: |
+            evaluation/results/scorecard.json
+            evaluation/results/history.jsonl
+            evaluation/results/TREND.md
+          retention-days: 90
+
+      # history.jsonl may differ after a live run — surface the diff as an
+      # artifact; merging updated trend files is a deliberate human PR.
+      - name: Trend diff (for manual PR)
+        run: git diff -- evaluation/results/ > trend.diff || true
+
+      - name: Upload trend diff
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-eval-trend-diff
+          path: trend.diff
+          retention-days: 30
