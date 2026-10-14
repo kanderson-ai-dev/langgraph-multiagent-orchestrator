@@ -111,6 +111,7 @@ def _target_factory(
                     judge_llm=judge_llm,
                     search=search,
                     scraper=scraper,
+                    auto_review=True,
                 )
             )
             return metrics

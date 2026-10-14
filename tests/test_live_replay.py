@@ -35,20 +35,31 @@ class _ReplaySearch:
 
     ``ddgs`` runs over ``curl_cffi`` — outside vcrpy's reach — so the
     recorded result sets (captured by ``record_cassettes.py``) stand in
-    for it. Unrecorded queries return empty, deterministically.
+    for it. Outcomes are consumed per call, in order: the Nth replayed
+    call to a query sees the Nth recorded outcome — a query that failed
+    mid-recording fails here too instead of leaking a later success.
+    Unrecorded queries return empty, deterministically.
     """
 
     def __init__(self, sidecar: Path) -> None:
-        self._queries: dict[str, list[dict[str, Any]]] = {}
+        self._queries: dict[str, list[list[dict[str, Any]]]] = {}
+        self._calls: dict[str, int] = {}
         if sidecar.exists():
-            self._queries = json.loads(sidecar.read_text("utf-8")).get(
-                "queries", {}
-            )
+            raw = json.loads(sidecar.read_text("utf-8")).get("queries", {})
+            for q, hits in raw.items():
+                # Current format: list of per-call outcome sets. A legacy
+                # flat ``query -> [hits]`` entry normalizes to one outcome.
+                self._queries[q] = (
+                    [hits] if hits and isinstance(hits[0], dict) else hits
+                )
 
     async def search(
         self, query: str, *, max_results: int, workspace_id: str = ""
     ) -> list[SearchResult]:
-        hits = self._queries.get(query, [])
+        idx = self._calls.get(query, 0)
+        self._calls[query] = idx + 1
+        outcomes = self._queries.get(query) or []
+        hits = outcomes[idx] if idx < len(outcomes) else []
         return [SearchResult(**h) for h in hits[:max_results]]
 
 

@@ -172,6 +172,61 @@ def build_eval_stub() -> StubLLM:
     return stub
 
 
+_AUTO_FUND_USD = 0.10
+_MAX_AUTO_RESUMES = 6
+
+
+def _auto_review_decision(payload: dict[str, Any]) -> dict[str, Any]:
+    """Operator stand-in for live evals — resolve a pause so the job
+    delivers. Mirrors what the console offers: approve an existing draft,
+    fund a budget stop so paid work continues, or send guidance back to
+    the writer when there is nothing to approve yet."""
+    allowed = set(payload.get("allowed_actions") or [])
+    if "approve" in allowed:
+        return {"action": "approve"}
+    if "fund" in allowed:
+        return {"action": "fund", "additional_budget_usd": _AUTO_FUND_USD}
+    if "edit" in allowed:
+        return {
+            "action": "edit",
+            "feedback": (
+                "Address every open feedback item: keep the required "
+                "section structure and cite only from gathered evidence."
+            ),
+        }
+    return {"action": "reject", "feedback": "auto-review: no viable action"}
+
+
+async def _invoke_resolving_hitl(
+    graph: Any, state: dict[str, Any], callbacks: Any, job_id: str
+) -> tuple[OrchestrationState, int]:
+    """Invoke the graph with a checkpointer and resolve every ``interrupt()``
+    like an on-call operator would — the live experiment measures the
+    *delivered* artifact, not a job abandoned at the first pause."""
+    from langgraph.types import Command
+
+    config = {"configurable": {"thread_id": job_id}, "callbacks": callbacks}
+    out = cast(OrchestrationState, await graph.ainvoke(state, config=config))
+    resumes = 0
+    while resumes < _MAX_AUTO_RESUMES:
+        pending = cast(
+            "list[Any] | None",
+            out.get("__interrupt__") if isinstance(out, dict) else None,
+        )
+        if not pending:
+            break
+        payload = getattr(pending[0], "value", {})
+        decision = _auto_review_decision(
+            payload if isinstance(payload, dict) else {}
+        )
+        out = cast(
+            OrchestrationState,
+            await graph.ainvoke(Command(resume=decision), config=config),
+        )
+        resumes += 1
+    return out, resumes
+
+
 async def run_eval_case(
     *,
     case_id: str,
@@ -183,13 +238,16 @@ async def run_eval_case(
     judge_llm: Any = None,
     search: Any = None,
     scraper: Any = None,
+    auto_review: bool = False,
 ) -> tuple[dict[str, Any], OrchestrationState]:
     """Run one dataset case through the real graph.
 
     Returns ``(metrics, state)`` — callers aggregate the metrics and may
     mine the state (evidence, prompt versions, final report). Offline by
     default; live callers inject a real ``llm`` plus real ``search`` /
-    ``scraper`` clients.
+    ``scraper`` clients. ``auto_review=True`` attaches a checkpointer and
+    resolves HITL interrupts automatically (approve/fund/edit) so a live
+    run measures the *delivered* report, not a job left paused.
     """
     from evaluation.evaluators import (
         blocked_correctly,
@@ -198,25 +256,20 @@ async def run_eval_case(
         rubric_score,
     )
 
-    graph = build_graph(
-        settings,
-        llm=llm or build_eval_stub(),
-        search=search or FixtureSearch(),
-        scraper=scraper or FixtureScraper(),  # type: ignore[arg-type]
-        prompts=registry,
-    )
+    job_id = f"eval-{case_id}"
     state = initial_state(
-        job_id=f"eval-{case_id}",
+        job_id=job_id,
         workspace_id="eval",
         brief=brief,
         max_debate_rounds=settings.max_debate_rounds,
     )
     started = time.monotonic()
+    hitl_resumes = 0
     # Bind a real usage tracker (throwaway sqlite) so cost/tokens are
     # measured by the same code path production jobs use.
     with tempfile.TemporaryDirectory() as tmp:
         tracker = UsageTracker(
-            job_id=f"eval-{case_id}",
+            job_id=job_id,
             workspace_id="eval",
             store=UsageStore(str(Path(tmp) / "usage.sqlite")),
             settings=settings,
@@ -224,14 +277,43 @@ async def run_eval_case(
         async with bind_tracker(tracker):
             with bind_trace(
                 name=f"eval:{case_id}",
-                session_id=f"eval-{case_id}",
+                session_id=job_id,
                 metadata={"case_id": case_id, "kind": "edd-eval"},
                 tags=["eval"],
             ) as callbacks:
-                out = cast(
-                    OrchestrationState,
-                    await graph.ainvoke(state, config={"callbacks": callbacks}),
-                )
+                if auto_review:
+                    from langgraph.checkpoint.sqlite.aio import (
+                        AsyncSqliteSaver,
+                    )
+
+                    async with AsyncSqliteSaver.from_conn_string(
+                        str(Path(tmp) / "checkpoints.sqlite")
+                    ) as checkpointer:
+                        graph = build_graph(
+                            settings,
+                            llm=llm or build_eval_stub(),
+                            search=search or FixtureSearch(),
+                            scraper=scraper or FixtureScraper(),  # type: ignore[arg-type]
+                            prompts=registry,
+                            checkpointer=checkpointer,
+                        )
+                        out, hitl_resumes = await _invoke_resolving_hitl(
+                            graph, state, callbacks, job_id
+                        )
+                else:
+                    graph = build_graph(
+                        settings,
+                        llm=llm or build_eval_stub(),
+                        search=search or FixtureSearch(),
+                        scraper=scraper or FixtureScraper(),  # type: ignore[arg-type]
+                        prompts=registry,
+                    )
+                    out = cast(
+                        OrchestrationState,
+                        await graph.ainvoke(
+                            state, config={"callbacks": callbacks}
+                        ),
+                    )
 
     # LLM-as-judge on the finished report — a distinct model when
     # credentials allow; a deterministic stub builder offline.
@@ -259,6 +341,7 @@ async def run_eval_case(
         "converged": debate_converged(out),
         "blocked": blocked_correctly(out),
         "expected_blocked": expect_blocked,
+        "hitl_resumes": hitl_resumes,
         "debate_rounds": out.get("debate_round", 0),
         "duration_seconds": round(time.monotonic() - started, 3),
         "cost_usd": round(tracker.total_cost, 8),

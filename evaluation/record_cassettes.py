@@ -152,20 +152,37 @@ def search_sidecar_path(case_id: str) -> Path:
 
 
 class _RecordingSearch:
-    """Wrap the real search client; dump every query's results."""
+    """Wrap the real search client; dump every query's results.
+
+    Outcomes are recorded per *call*, in order — a query that fails in
+    round 1 but succeeds in round 3 keeps both outcomes, so a replay
+    reproduces the exact run instead of seeing the later success early.
+    """
 
     def __init__(self, inner: Any) -> None:
         self._inner = inner
-        self.captures: dict[str, list[dict[str, Any]]] = {}
+        self.captures: dict[str, list[list[dict[str, Any]]]] = {}
 
     async def search(
         self, query: str, *, max_results: int, workspace_id: str = ""
     ) -> list[Any]:
-        results = await self._inner.search(query, max_results=max_results)
-        self.captures[query] = [
-            r.model_dump() if hasattr(r, "model_dump") else dict(r)
-            for r in results
-        ]
+        outcomes = self.captures.setdefault(query, [])
+        try:
+            results = await self._inner.search(
+                query, max_results=max_results, workspace_id=workspace_id
+            )
+        except Exception:
+            # A transient failure is itself an outcome: an empty set here
+            # reproduces the skipped query exactly (the researcher treats
+            # a raised search and zero hits identically).
+            outcomes.append([])
+            raise
+        outcomes.append(
+            [
+                r.model_dump() if hasattr(r, "model_dump") else dict(r)
+                for r in results
+            ]
+        )
         return results
 
 

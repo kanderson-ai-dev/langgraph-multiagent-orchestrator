@@ -36,7 +36,10 @@ from evaluation.run_eval import _run_case
 DATASET_NAME = "langgraph-orchestrator-eval-v1"
 
 # Per-case score keys pushed as Langfuse scores (NUMERIC).
-_SCORE_KEYS = ["citation_support", "rubric_score", "judge_score", "converged"]
+_SCORE_KEYS = [
+    "citation_support", "rubric_score", "judge_score", "converged",
+    "hitl_resumes",
+]
 
 
 def _settings_with_env() -> Settings:
@@ -120,6 +123,7 @@ def _make_task(
                 judge_llm=judge_llm,
                 search=search,
                 scraper=scraper,
+                auto_review=True,
             )
             return metrics
 
@@ -144,7 +148,15 @@ def _metric(key: str) -> Any:
         metadata: Any = None,
         **kwargs: Any,
     ) -> Any:
-        score = (output or {}).get(key, 0.0)
+        out = output or {}
+        # A correctly blocked case produces no draft/report — the quality
+        # metrics are N/A there; emitting 0.0 would disguise a *success*
+        # as a failure. ``blocked_correctly`` is its metric.
+        if (expected_output or {}).get("expect_blocked"):
+            return None
+        score = out.get(key)
+        if score is None:
+            return None
         return Evaluation(
             name=key, value=float(score), data_type="NUMERIC"
         )

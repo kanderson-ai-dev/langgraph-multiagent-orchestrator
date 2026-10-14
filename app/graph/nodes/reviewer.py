@@ -26,6 +26,7 @@ from app.graph.state import (
     ReviewVerdict,
     Verdict,
 )
+from app.graph.teams import SECTION_TEMPLATES
 from app.services.llm_client import StructuredLLM
 from app.services.prompt_registry import PromptRegistry
 
@@ -98,11 +99,18 @@ class ReviewerWorker:
         cites = "\n".join(
             f"- [{c.source_url}] {c.claim} (quote: {c.quote[:120]}…)" for c in kept
         ) or "(no supported citations)"
+        # Grade structure against the contract the Writer was given — the
+        # reviewer previously invented its own outline and demanded sections
+        # (e.g. "Findings") that don't exist in this report type's template.
+        template = SECTION_TEMPLATES.get(
+            brief.report_type, SECTION_TEMPLATES["general"]
+        )
         return (
             f"Brief — topic: {brief.topic}; type: {brief.report_type}; "
             f"audience: {brief.audience}; tone: {brief.tone}\n"
             + (f"Client context: {brief.tenant_context}\n" if brief.tenant_context else "")
-            + f"Requirements:\n{reqs}\n\n"
+            + f"Requirements:\n{reqs}\n"
+            f"Expected section structure: {template}\n\n"
             f"Draft v{draft.version} title: {draft.title}\n\n"
             f"{draft.markdown}\n\nSupported citations:\n{cites}"
         )
