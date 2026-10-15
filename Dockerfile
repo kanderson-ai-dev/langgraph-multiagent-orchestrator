@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1
 FROM python:3.13-slim
 
+LABEL org.opencontainers.image.authors="Kaarsten Anderson <contact@kaarstenanderson.com>" \
+      maintainer="Kaarsten Anderson <contact@kaarstenanderson.com>"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \

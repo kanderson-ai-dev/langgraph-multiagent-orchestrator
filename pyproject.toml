@@ -2,7 +2,7 @@
 name = "langgraph-multiagent-orchestrator"
 version = "0.1.0"
 description = "Supervisor-Workers multi-agent B2B report orchestration microservice (FastAPI + LangGraph)"
-authors = [{ name = "Kaarsten Anderson" }]
+authors = [{ name = "Kaarsten Anderson", email = "contact@kaarstenanderson.com" }]
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
