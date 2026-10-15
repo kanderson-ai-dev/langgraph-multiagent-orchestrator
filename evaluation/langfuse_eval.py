@@ -210,13 +210,21 @@ def _run_name(registry: PromptRegistry) -> str:
     return f"writer-v{version}-{_git_sha()}-{stamp}"
 
 
-def run_langfuse_experiment(*, live: bool = False) -> str | None:
+def run_langfuse_experiment(
+    *,
+    live: bool = False,
+    registry: PromptRegistry | None = None,
+) -> str | None:
     """Upload the dataset and run a Langfuse experiment.
 
     Returns the experiment run name, or ``None`` when Langfuse is not
     configured — EDD gates never depend on Langfuse being reachable.
     ``live=True`` additionally requires ``OPENAI_API_KEY`` and spends
     real tokens; never use it in the mandatory CI path.
+
+    Pass ``registry.with_overrides({...})`` to evaluate a pinned candidate
+    against the promoted prompts — the run name picks up the pinned
+    version so Langfuse compares candidate-vs-promoted side by side.
     """
     settings = _settings_with_env()
     client = _langfuse_client()
@@ -228,7 +236,7 @@ def run_langfuse_experiment(*, live: bool = False) -> str | None:
         )
         return None
 
-    registry = PromptRegistry.load()  # promoted YAML prompts
+    registry = registry or PromptRegistry.load()  # promoted YAML prompts
     dataset = _ensure_dataset(client)
     result = client.run_experiment(
         name=DATASET_NAME,

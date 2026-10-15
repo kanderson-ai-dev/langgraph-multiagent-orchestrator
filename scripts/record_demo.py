@@ -32,12 +32,12 @@ OUT = "docs/screenshots/demo.gif"
 # Per-phase frame dwell (ms) — slow enough that a viewer can actually read
 # each surface; identical frames dedupe, so static content costs one frame.
 DUR = {
-    "landing": 1500,
-    "run": 500,
-    "hitl": 2800,
-    "report": 1500,
-    "tab": 3000,
-    "final": 4000,
+    "landing": 2600,
+    "run": 700,
+    "hitl": 3600,
+    "report": 2200,
+    "tab": 4200,
+    "final": 4500,
 }
 
 BRIEF = {
@@ -192,12 +192,40 @@ def main() -> None:
             page.wait_for_timeout(400)
             shot(page, "report")
 
+            # ── Report feedback widget: thumbs-up → queued ────────────
+            try:
+                up = page.locator('.fb-btn[data-rating="up"]')
+                if up.is_visible():
+                    up.click()
+                    page.wait_for_function(
+                        "document.querySelector('#fb-status')"
+                        ".textContent.trim() !== ''",
+                        timeout=8000,
+                    )
+                    shot(page, "report", 2)
+            except Exception:
+                pass
+
             # ── Tour the other console surfaces ───────────────────────
             _tour_prompt_registry(page)
             _tour_performance(page)
             _tour_audit(page, job_id)
-            page.click("#tabbtn-jobs")
-            shot(page, "final")
+
+            # ── Public surfaces: status endpoint + Swagger API docs ───
+            page.goto(BASE + "/status", wait_until="networkidle")
+            shot(page, "tab", 2)
+            page.goto(BASE + "/docs", wait_until="networkidle")
+            shot(page, "tab", 2)
+
+            # ── Close on the deep link: reload restores the finished
+            # job — report, transcript, seal — from ?job=<id> alone. ───
+            page.goto(BASE + "/console/?job=" + job_id,
+                      wait_until="networkidle")
+            with contextlib.suppress(Exception):
+                page.wait_for_selector(
+                    "#report-card:not(.hidden)", timeout=15000
+                )
+            shot(page, "final", 2)
         else:
             print(f"demo job ended as {status}", file=sys.stderr)
 
