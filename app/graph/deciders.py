@@ -81,7 +81,11 @@ def rule_based_decider(state: dict[str, Any], registry: WorkerRegistry) -> Routi
     for name in registry.names():
         if name not in _CORE and name not in done:
             return RoutingDecision(
-                next_worker=name, reason=f"specialist analysis pending: {name}"
+                next_worker=name,
+                reason=(
+                    "specialist analysis pending: "
+                    + name.replace("_", " ")
+                ),
             )
     if not state.get("drafts") and "writer" in registry:
         return RoutingDecision(next_worker="writer", reason="evidence ready, no draft")

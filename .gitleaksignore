@@ -4,3 +4,9 @@
 # the working-tree copy is scrubbed and this fingerprint only silences the
 # historical blob.
 2028cb2ae228416fb78eb60cfd4e342d733f2a1a:tests/cassettes/edd_rag-saas.yaml:generic-api-key:1828
+# False positive: an Instana RUM beacon key in a commented-out snippet inside
+# IBM page HTML captured by the re-recorded EDD cassette. It is the scraped
+# site's own public client-side monitoring id, not a project secret; the
+# working-tree copy is scrubbed and this fingerprint only silences the
+# historical blob.
+3876d4ae6174b67e1952960306713c6532449b6c:tests/cassettes/edd_rag-saas.yaml:generic-api-key:18257

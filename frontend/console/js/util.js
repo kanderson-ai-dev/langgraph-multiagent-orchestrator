@@ -15,6 +15,15 @@ export function prettyName(s) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** ISO timestamp → short local label ("Oct 15, 13:27"); "" on bad input. */
+export function shortDate(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
+
 export function md(src) {
   const esc = escapeHtml(src);
   const lines = esc.split(/\r?\n/);

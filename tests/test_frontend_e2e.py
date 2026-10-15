@@ -322,6 +322,11 @@ def test_console_responsive(live_server: Any) -> None:
     """375/768/1280 px: no horizontal overflow, all four tabs reachable."""
     if sync_playwright is None:
         pytest.skip("playwright not installed")
+    shots = (
+        __import__("pathlib").Path(__file__).resolve().parent.parent
+        / "docs" / "ui-qa" / "breakpoints"
+    )
+    shots.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
         try:
             browser = _browser(p)
@@ -339,6 +344,10 @@ def test_console_responsive(live_server: Any) -> None:
                         "document.documentElement.scrollWidth"
                         " <= document.documentElement.clientWidth + 1",
                         timeout=10000)
+                    page.screenshot(
+                        path=str(shots / f"console-{tab}-{width}px.png"),
+                        full_page=True,
+                    )
                 page.close()
         finally:
             browser.close()

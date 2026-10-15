@@ -3,7 +3,7 @@
 
 import { api, apiPost } from "../api.js";
 import { openStream } from "../sse.js";
-import { $, escapeHtml, prettyName, toast } from "../util.js";
+import { $, escapeHtml, prettyName, shortDate, toast } from "../util.js";
 import { state, emitJobChange } from "../state.js";
 import { renderReport } from "./report.js";
 import { openHitl, closeHitl, resetHitlState } from "./review.js";
@@ -45,10 +45,11 @@ export async function refreshJobs() {
       li.innerHTML =
         `<span class="jobs-topic">${escapeHtml(j.topic)}</span>` +
         `<span class="jobs-meta">` +
-        `<span class="status sm ${escapeHtml(j.status)}">${escapeHtml(j.status)}</span>` +
+        `<span class="status sm ${escapeHtml(j.status)}">${escapeHtml(prettyName(j.status))}</span>` +
+        `<span class="jobs-when">${escapeHtml(shortDate(j.created_at))}</span>` +
         `<span class="jobs-cost">$${(j.cost_usd || 0).toFixed(3)}</span>` +
         `</span>`;
-      li.title = `${j.report_type} · ${j.job_id}`;
+      li.title = `${prettyName(j.report_type)} · ${j.job_id}`;
       li.addEventListener("click", () => {
         history.replaceState(null, "", `?job=${encodeURIComponent(j.job_id)}`);
         attachJob(j.job_id);
@@ -63,7 +64,7 @@ export async function refreshJobs() {
 
 export function setStatus(status) {
   const el = $("#job-status");
-  el.textContent = status;
+  el.textContent = prettyName(status);
   el.className = `status ${status}`;
   // A paused job keeps a persistent "Review required" affordance so the
   // modal can be dismissed and reopened without losing the exit path.
@@ -159,7 +160,7 @@ export async function attachJob(jobId) {
   }
   $("#job-cost").textContent = `$${(job.cost_usd || 0).toFixed(4)}`;
   setStatus(job.status);
-  if (job.result?.report) renderReport(job.result);
+  if (job.result?.report) renderReport(job.result, jobId);
   if (job.status === "awaiting_review") {
     openHitl(job.result?.escalation_reason, job.result?.allowed_actions);
   }
@@ -201,7 +202,7 @@ async function finalize() {
     return;
   }
   closeHitl();
-  if (job.result?.report) renderReport(job.result);
+  if (job.result?.report) renderReport(job.result, job.job_id);
   refreshDashboard();
   refreshJobs();
 }

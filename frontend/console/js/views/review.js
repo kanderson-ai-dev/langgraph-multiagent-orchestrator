@@ -79,7 +79,7 @@ export function openHitl(reason, allowedActions) {
 export function closeHitl() {
   state.hitlOpen = false;
   $("#hitl-modal").classList.add("hidden");
-  if ($("#job-status").textContent === "awaiting_review") {
+  if ($("#job-status").classList.contains("awaiting_review")) {
     $("#review-btn").classList.remove("hidden");
   }
 }

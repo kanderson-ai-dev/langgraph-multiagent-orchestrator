@@ -284,7 +284,11 @@ def build_graph(
                     AgentMessage(
                         sender="supervisor", recipient=d.worker,
                         kind="dispatch",
-                        content=d.mandate or d.reason or f"parallel {d.worker}",
+                        content=(
+                            d.mandate
+                            or d.reason
+                            or f"parallel {d.worker.replace('_', ' ')}"
+                        ),
                         round=rounds,
                     )
                     for d in decision.dispatches
@@ -307,7 +311,11 @@ def build_graph(
         target = FINISH if nxt == FINISH else nxt
         msg = AgentMessage(
             sender="supervisor", recipient=target, kind="dispatch",
-            content=reason or f"routing to {target}",
+            content=(
+                reason.replace("_", " ")
+                if reason
+                else f"routing to {target.replace('_', ' ')}"
+            ),
         )
         update: dict[str, Any] = {
             "next_worker": target,

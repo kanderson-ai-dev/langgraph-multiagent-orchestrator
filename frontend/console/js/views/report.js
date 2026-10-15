@@ -4,9 +4,14 @@
 
 import { api, apiPost } from "../api.js";
 import { $, escapeHtml, md, toast } from "../util.js";
-import { state } from "../state.js";
 
-export async function renderReport(result) {
+/* The job whose report is on the card — audit/exports/feedback must target
+ * this, not `state.currentJob`, which another in-flight attachJob may have
+ * already moved to a different (still running) job. */
+let renderedJobId = null;
+
+export async function renderReport(result, jobId) {
+  renderedJobId = jobId;
   const card = $("#report-card");
   card.classList.remove("hidden");
   // The audit seal is appended to the markdown for the PDF; the badge
@@ -15,7 +20,7 @@ export async function renderReport(result) {
     /\n?-{3,}\s*\n_Audit root:[\s\S]*$/m, ""
   );
   $("#report").innerHTML = md(reportMd);
-  const base = `/api/v1/orchestration/reports/${state.currentJob}`;
+  const base = `/api/v1/orchestration/reports/${jobId}`;
   $("#pdf-link").href = `${base}/report.pdf`;
   $("#pdf-link").classList.remove("hidden");
   for (const ext of ["pdf", "docx", "md"]) {
@@ -40,7 +45,7 @@ export async function renderReport(result) {
 
   // Tamper-evident audit trail: re-verified server-side on demand.
   try {
-    const a = await api(`/orchestration/reports/${state.currentJob}/audit`);
+    const a = await api(`/orchestration/reports/${jobId}/audit`);
     const badge = $("#audit-badge");
     badge.textContent = a.valid
       ? `audit ✓ ${String(a.audit_root).slice(0, 12)}…`
@@ -54,11 +59,11 @@ export async function renderReport(result) {
 export function initReportView() {
   document.querySelectorAll(".fb-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!state.currentJob) return;
+      if (!renderedJobId) return;
       btn.disabled = true;
       try {
         await apiPost("/feedback", {
-          job_id: state.currentJob,
+          job_id: renderedJobId,
           rating: btn.dataset.rating,
           comment: $("#fb-comment").value.trim(),
         });

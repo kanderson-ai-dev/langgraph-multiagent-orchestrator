@@ -133,6 +133,7 @@ textarea { resize: vertical; }
 }
 .jobs-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .jobs-cost { font: 500 10px var(--mono); color: var(--muted); }
+.jobs-when { font: 500 10px var(--mono); color: var(--muted); }
 .status.sm { padding: 1px 7px; font-size: 9px; }
 .jobs-empty { margin: 0; font-size: 12px; color: var(--muted); }
 
