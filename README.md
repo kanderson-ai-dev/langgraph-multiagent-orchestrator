@@ -246,13 +246,25 @@ cost and 3× the calls of a single prompt.
 ### Live experiments (LangSmith / Langfuse)
 
 The same dataset pushed through a live provider — per-case evaluator
-scores, including the `blocked-injection` adversarial case failing loudly
-in red exactly as designed. The current live backend is **Langfuse**
-(`TRACING_PROVIDER=langfuse`; LangSmith's monthly quota ran out — see
-[`docs/eval/why-langfuse.md`](docs/eval/why-langfuse.md)):
+scores, including the `blocked-injection` adversarial case blocked with
+zero tokens spent, exactly as designed. The current live backend is
+**Langfuse** (`TRACING_PROVIDER=langfuse`; LangSmith's monthly quota ran
+out — see [`docs/eval/why-langfuse.md`](docs/eval/why-langfuse.md)):
 
-![LangSmith experiment summary](docs/screenshots/langsmith-experiment-summary.png)
-![LangSmith experiment detail](docs/screenshots/langsmith-experiment-detail.png)
+![Langfuse experiment runs — one run per commit on the same golden dataset; item count, errors, latency and token cost per run](docs/eval/langfuse-experiment-runs.png)
+
+Every run name is `<prompt_version>-<git sha>-<date>`, which makes the
+Prompt Registry A/B gate a first-class Langfuse comparison — below,
+candidate **writer v2** (exact section structure + targeted revision)
+measured against promoted **v1** on the same dataset:
+
+![Prompt A/B in Langfuse — writer v2 vs promoted v1: citation 0.79 vs 0.85, judge 4.0 vs 4.25 — the regression correctly keeps v1 promoted](docs/eval/langfuse-ab-compare.png)
+
+`converged` reads 0.00 on every live run: the Writer↔Reviewer debate
+exhausts its 3-round budget without the Reviewer issuing `approve`, so a
+human approves via `interrupt()` (`hitl_resumes` = 1.00). Reports still
+deliver; convergence-without-escalation is the open quality gap the A/B
+gate exists to close.
 
 Live surfaces publish **measured results only** — there is deliberately
 no stub fallback for `--langsmith-live`/`--langfuse-live` (see

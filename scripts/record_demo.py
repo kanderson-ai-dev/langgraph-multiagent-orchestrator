@@ -32,12 +32,12 @@ OUT = "docs/screenshots/demo.gif"
 # Per-phase frame dwell (ms) — slow enough that a viewer can actually read
 # each surface; identical frames dedupe, so static content costs one frame.
 DUR = {
-    "landing": 2600,
-    "run": 700,
-    "hitl": 3600,
-    "report": 2200,
-    "tab": 4200,
-    "final": 4500,
+    "landing": 1500,
+    "run": 500,
+    "hitl": 2800,
+    "report": 1500,
+    "tab": 3000,
+    "final": 4000,
 }
 
 BRIEF = {
@@ -210,12 +210,6 @@ def main() -> None:
             _tour_prompt_registry(page)
             _tour_performance(page)
             _tour_audit(page, job_id)
-
-            # ── Public surfaces: status endpoint + Swagger API docs ───
-            page.goto(BASE + "/status", wait_until="networkidle")
-            shot(page, "tab", 2)
-            page.goto(BASE + "/docs", wait_until="networkidle")
-            shot(page, "tab", 2)
 
             # ── Close on the deep link: reload restores the finished
             # job — report, transcript, seal — from ?job=<id> alone. ───
