@@ -25,6 +25,7 @@ from langgraph.graph.state import CompiledStateGraph
 from app.core.config import Settings
 from app.framework import (
     FINISH,
+    DispatchSpec,
     RouterDecider,
     Supervisor,
     Worker,
@@ -297,7 +298,20 @@ def build_graph(
             decision = await supervisor.decide(dict(state), registry=team_registry)
             if decision.dispatches:
                 # Dynamic fan-out: the supervisor chose parallel dispatches.
-                sends = [d.model_dump() for d in decision.dispatches]
+                # Duplicate workers are fine in general (e.g. two researchers
+                # with different mandates), but the Reviewer is the debate's
+                # auditor — two parallel instances would write `latest_verdict`
+                # / `debate_round` concurrently and crash the step. Keep the
+                # first reviewer spec only.
+                seen_reviewer = False
+                pruned: list[DispatchSpec] = []
+                for d in decision.dispatches:
+                    if d.worker == reviewer.name:
+                        if seen_reviewer:
+                            continue
+                        seen_reviewer = True
+                    pruned.append(d)
+                sends = [d.model_dump() for d in pruned]
                 msgs = [
                     AgentMessage(
                         sender="supervisor", recipient=d.worker,
