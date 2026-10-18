@@ -2,6 +2,8 @@ services:
   orchestrator:
     build: .
     image: langgraph-multiagent-orchestrator
+    labels:
+      org.opencontainers.image.authors: "Kaarsten Anderson <contact@kaarstenanderson.com>"
     ports:
       - "${PORT:-8000}:8000"
     # Optional: place real keys in .env (gitignored) — without them the app

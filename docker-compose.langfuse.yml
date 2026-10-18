@@ -1,3 +1,5 @@
+# Author: Kaarsten Anderson <contact@kaarstenanderson.com>
+#
 # Optional Langfuse self-host stack — use only if you want traces to stay
 # on your own infra instead of Langfuse Cloud. The SaaS (cloud.langfuse.com)
 # works with no extra setup; this file is a convenience, never a dependency.
