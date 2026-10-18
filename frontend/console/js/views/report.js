@@ -47,10 +47,13 @@ export async function renderReport(result, jobId) {
   try {
     const a = await api(`/orchestration/reports/${jobId}/audit`);
     const badge = $("#audit-badge");
+    const sig = a.signature_valid === true ? " signed"
+      : a.signature_valid === false ? " ✗signature" : "";
     badge.textContent = a.valid
-      ? `audit ✓ ${String(a.audit_root).slice(0, 12)}…`
+      ? `audit ✓ ${String(a.audit_root).slice(0, 12)}…${sig}`
       : "audit ✗ INVALID";
-    badge.style.color = a.valid ? "var(--ok)" : "var(--danger)";
+    badge.style.color = a.valid && a.signature_valid !== false
+      ? "var(--ok)" : "var(--danger)";
     badge.classList.remove("hidden");
   } catch { /* audit is best-effort */ }
 }

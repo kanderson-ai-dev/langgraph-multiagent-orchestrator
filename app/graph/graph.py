@@ -344,9 +344,11 @@ def build_graph(
                     AgentMessage(
                         sender="supervisor", recipient=target,
                         kind="system",
+                        # The full 64-hex root goes into the audited chain —
+                        # only the human-facing report footnote truncates it.
                         content=(
                             f"Evidence sealed: {manifest['count']} sources, "
-                            f"manifest root {manifest['root'][:12]}…"
+                            f"manifest root {manifest['root']}"
                         ),
                     )
                 )

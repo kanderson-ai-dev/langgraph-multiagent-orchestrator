@@ -112,6 +112,11 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password_hash: SecretStr | None = None
 
+    # Audit signing (optional): HMAC key that authenticates audit roots so
+    # a DB-only attacker cannot recompute a forged-but-consistent chain.
+    # Unset → roots are hash-only and the API reports "signed": false.
+    audit_signing_key: SecretStr | None = None
+
     # Rate limiting
     rate_limit_per_minute: int = Field(default=60, ge=0)
     sse_heartbeat_seconds: float = Field(default=15.0, gt=0)
@@ -153,6 +158,7 @@ class Settings(BaseSettings):
         "langfuse_secret_key",
         "jwt_secret_key",
         "admin_password_hash",
+        "audit_signing_key",
         "redis_url",
         mode="before",
     )

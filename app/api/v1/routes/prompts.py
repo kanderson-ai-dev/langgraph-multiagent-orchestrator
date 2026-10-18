@@ -139,7 +139,11 @@ async def registry_audit(
         valid, root, entries = registry.verify_audit_chain()
     except PromptRegistryError as exc:
         raise _registry_error(exc) from exc
-    return {"valid": valid, "root": root, "entries": entries}
+    head_sig = entries[-1]["signature_valid"] if entries else None
+    return {
+        "valid": valid, "root": root, "entries": entries,
+        "head_signature_valid": head_sig,
+    }
 
 
 _AB_RUN_CACHE_MAX = 100

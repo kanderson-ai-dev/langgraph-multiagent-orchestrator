@@ -309,6 +309,24 @@ class JobRunner:
             pass
         status = str(values.get("status", "failed"))
         cost = await self._usage.job_cost(job_id)
+        # Sign the audit-root tip when the deployment holds a signing key —
+        # a DB-only attacker could recompute a consistent chain but not the
+        # HMAC. Unsigned deployments persist no signature (honest "signed":
+        # false on the audit endpoint).
+        signing_key = (
+            self._settings.audit_signing_key.get_secret_value()
+            if self._settings.audit_signing_key
+            else None
+        )
+
+        def _sig(root: Any) -> str | None:
+            if not signing_key or not isinstance(root, str) or not root:
+                return None
+            from app.services.audit import sign_root
+
+            return sign_root(
+                signing_key, root, job_id=job_id, workspace_id=workspace_id
+            )
         # Job-level latency (active segment — HITL pauses excluded).
         elapsed = time.monotonic() - started
         from app.core.latency import LATENCY
@@ -320,12 +338,14 @@ class JobRunner:
             transcript = list(values.get("transcript", []))
             from app.services.audit import chain_transcript
 
+            audit_root = values.get("audit_root")
             await self._jobs.set_result(
                 workspace_id,
                 job_id,
                 {
                     "report": values.get("final_report"),
-                    "audit_root": values.get("audit_root"),
+                    "audit_root": audit_root,
+                    "audit_signature": _sig(audit_root),
                     "audit_entries": [
                         e.model_dump() for e in chain_transcript(transcript)
                     ],
@@ -368,6 +388,9 @@ class JobRunner:
             from app.services.audit import audit_root as root_of
             from app.services.audit import chain_transcript
 
+            # The report assembler never ran, so seal the chain tip
+            # here — the audit endpoint can still verify.
+            audit_root = values.get("audit_root") or root_of(transcript)
             await self._jobs.set_result(
                 workspace_id,
                 job_id,
@@ -375,10 +398,8 @@ class JobRunner:
                     "report": None,
                     "rejection_reason": values.get("rejection_reason"),
                     "errors": [str(e) for e in values.get("errors", [])],
-                    # The report assembler never ran, so seal the chain tip
-                    # here — the audit endpoint can still verify.
-                    "audit_root": values.get("audit_root")
-                    or root_of(transcript),
+                    "audit_root": audit_root,
+                    "audit_signature": _sig(audit_root),
                     "audit_entries": [
                         e.model_dump() for e in chain_transcript(transcript)
                     ],

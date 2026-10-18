@@ -102,7 +102,13 @@ def build_runner(
     search = build_search_client(settings, cache=cache)
     scraper = ScraperClient(settings, cache=cache)
     prompts = PromptRegistry.load(
-        DEFAULT_PROMPTS_DIR, db_path=settings.database_path
+        DEFAULT_PROMPTS_DIR,
+        db_path=settings.database_path,
+        signing_key=(
+            settings.audit_signing_key.get_secret_value()
+            if settings.audit_signing_key
+            else None
+        ),
     )
     graph = build_graph(
         settings, llm=llm, search=search, scraper=scraper,

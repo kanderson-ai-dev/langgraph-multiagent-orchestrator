@@ -20,7 +20,7 @@ content** gathered by the Researcher agent.
 | Prompt tampering | Prompt Registry templates | Lifecycle mutations are **admin-only** (RBAC) and every mutation appends to a hash-chained audit log — tampering is detectable (`PromptStore.audit_log`) |
 | Promotion abuse | Registry `promote`/`rollback` | Metric-gated promotion (`run_ab_eval` + `PROMPT_PROMOTION_EPSILON`); admin overrides require an explicit `reason` that lands in the audit chain |
 | Malicious candidates | `POST /prompts/{name}/candidates` | Candidate registration is admin-gated; a candidate is never promoted without measured eval results — supply ends in an auditable `draft`, never silently live |
-| Report tampering | `GET /reports/{id}/audit`, `/evidence` | Transcript entries and the evidence manifest (per-source SHA-256) are sealed into the job's hash chain — `verify` re-computes the chain and flags divergence |
+| Report tampering | `GET /reports/{id}/audit`, `/evidence` | Transcript entries and the evidence manifest (per-source SHA-256) are sealed into the job's hash chain — `verify` re-computes the chain and flags divergence. With `AUDIT_SIGNING_KEY` set, the chain tip is HMAC-signed so a DB-only attacker who recomputes a consistent chain still fails `signature_valid`; without the key the API reports `"signed": false` honestly |
 
 ## RBAC
 
@@ -110,3 +110,8 @@ real scraped HTML and LLM payloads. Before a cassette is committed:
   hostnames to private ranges) is a documented next step.
 - robots.txt fetch failures default to *allow* with a log line — trade-off
   documented in `scraper_client.py`.
+- Audit signatures authenticate the chain tip against **DB-only** attackers.
+  An attacker who also steals `AUDIT_SIGNING_KEY` can forge signatures — the
+  key must live outside the DB (env/secret manager). There is no key
+  rotation (`AUDIT_SIGNING_KEY_ID`) and no external timestamping/anchoring —
+  recorded as next steps.

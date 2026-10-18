@@ -350,11 +350,16 @@ async def audit_trail(
     job_id: str,
     request: Request,
     ctx: RequestContext = Depends(require_role("viewer")),
+    settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     """Return the hash-chained audit trail and re-verify it on the fly.
 
     ``valid`` is recomputed from the stored transcript — a tampered history
-    would fail verification rather than parrot a stored ``True``.
+    would fail verification rather than parrot a stored ``True``. When the
+    deployment holds ``AUDIT_SIGNING_KEY``, the stored ``audit_signature``
+    is verified too: a DB-only attacker could recompute a consistent chain
+    but could not mint the HMAC. Unsigned deployments report
+    ``signature_valid: null`` honestly.
     """
     job = await _jobs(request).get(ctx.workspace_id, job_id)
     if job is None:
@@ -363,7 +368,12 @@ async def audit_trail(
         raise HTTPException(status_code=409, detail="audit trail not ready")
 
     from app.graph.state import AgentMessage
-    from app.services.audit import GENESIS, chain_transcript, verify_chain
+    from app.services.audit import (
+        GENESIS,
+        chain_transcript,
+        verify_chain,
+        verify_signature,
+    )
 
     raw = job.result["transcript"]
     if not isinstance(raw, list):
@@ -371,10 +381,22 @@ async def audit_trail(
     messages = [AgentMessage.model_validate(m) for m in raw]
     entries = chain_transcript(messages)
     stored_root = str(job.result.get("audit_root") or GENESIS)
+    signature = job.result.get("audit_signature")
+    signature_valid: bool | None = None
+    if settings.audit_signing_key and isinstance(signature, str) and signature:
+        signature_valid = verify_signature(
+            settings.audit_signing_key.get_secret_value(),
+            signature,
+            stored_root,
+            job_id=job.job_id,
+            workspace_id=job.workspace_id,
+        )
     return {
         "job_id": job.job_id,
         "audit_root": stored_root,
         "valid": verify_chain(messages, stored_root),
+        "signed": signature_valid is not None,
+        "signature_valid": signature_valid,
         "entries": [e.model_dump() for e in entries],
         "evidence_root": job.result.get("evidence_root"),
         "evidence_manifest": job.result.get("evidence_manifest"),

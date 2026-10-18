@@ -75,3 +75,30 @@ def verify_chain(messages: list[AgentMessage], expected_root: str) -> bool:
     import hmac
 
     return hmac.compare_digest(audit_root(messages), expected_root)
+
+
+def _canonical_scope(root: str, job_id: str, workspace_id: str) -> bytes:
+    return f"{workspace_id}|{job_id}|{root}".encode()
+
+
+def sign_root(
+    key: str, root: str, *, job_id: str, workspace_id: str
+) -> str:
+    """HMAC-SHA256 over ``workspace|job|root`` — proves the chain tip was
+    sealed by this deployment, not recomputed by a DB writer."""
+    import hmac
+
+    return hmac.new(
+        key.encode(), _canonical_scope(root, job_id, workspace_id),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def verify_signature(
+    key: str, signature: str, root: str, *, job_id: str, workspace_id: str
+) -> bool:
+    """Constant-time check of a stored audit-root signature."""
+    import hmac
+
+    expected = sign_root(key, root, job_id=job_id, workspace_id=workspace_id)
+    return hmac.compare_digest(signature, expected)

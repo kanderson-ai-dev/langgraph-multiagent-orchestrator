@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS prompt_events (
     metrics_json TEXT NOT NULL DEFAULT '{}',
     prev_hash    TEXT NOT NULL,
     hash         TEXT NOT NULL,
+    sig          TEXT NOT NULL DEFAULT '',
     created_at   TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS prompt_ab_runs (
@@ -147,9 +148,11 @@ class PromptRegistry:
         *,
         promoted_overrides: dict[str, int] | None = None,
         yaml_versions: dict[tuple[str, int], PromptVersion] | None = None,
+        signing_key: str | None = None,
     ) -> None:
         self._versions = versions
         self._conn = conn
+        self._signing_key = signing_key
         self._lock = threading.Lock()
         self._promoted_overrides = dict(promoted_overrides or {})
         # Pristine YAML seeds kept for cross-process refreshes: a second
@@ -165,6 +168,7 @@ class PromptRegistry:
         cls,
         prompts_dir: Path | str = DEFAULT_PROMPTS_DIR,
         db_path: str | None = None,
+        signing_key: str | None = None,
     ) -> PromptRegistry:
         """Load YAML seeds (+ SQLite overlay when ``db_path`` is given).
 
@@ -184,7 +188,9 @@ class PromptRegistry:
             versions = cls._merge_db(conn, versions)
 
         cls._validate(versions)
-        return cls(versions, conn, yaml_versions=yaml_versions)
+        return cls(
+            versions, conn, yaml_versions=yaml_versions, signing_key=signing_key
+        )
 
     @staticmethod
     def _load_yaml(prompts_dir: Path) -> dict[tuple[str, int], PromptVersion]:
@@ -229,6 +235,13 @@ class PromptRegistry:
         conn = connect_sync(db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.executescript(_SCHEMA)
+        # Guarded migration: older DBs lack the per-event HMAC column.
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(prompt_events)")}
+        if "sig" not in cols:
+            conn.execute(
+                "ALTER TABLE prompt_events ADD COLUMN sig TEXT NOT NULL DEFAULT ''"
+            )
+            conn.commit()
         return conn
 
     @staticmethod
@@ -447,6 +460,16 @@ class PromptRegistry:
         pv.status = status
         self._persist(pv, status_overridden=True)
 
+    def _sign(self, digest: str) -> str:
+        """HMAC over an event hash when the deployment holds a key."""
+        if not self._signing_key:
+            return ""
+        import hmac
+
+        return hmac.new(
+            self._signing_key.encode(), digest.encode(), hashlib.sha256
+        ).hexdigest()
+
     def _record_event(
         self,
         *,
@@ -473,14 +496,15 @@ class PromptRegistry:
         digest = hashlib.sha256(
             f"{prev_hash}|{_event_canonical(payload)}".encode()
         ).hexdigest()
+        sig = self._sign(digest)
         conn.execute(
             "INSERT INTO prompt_events (name, version, action, actor, reason,"
-            " metrics_json, prev_hash, hash, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?)",
+            " metrics_json, prev_hash, hash, sig, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 name, version, action, actor, reason,
                 json.dumps(metrics or {}, sort_keys=True),
-                prev_hash, digest, now,
+                prev_hash, digest, sig, now,
             ),
         )
         conn.commit()
@@ -579,8 +603,16 @@ class PromptRegistry:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def verify_audit_chain(self) -> tuple[bool, str, list[dict[str, Any]]]:
-        """Recompute the lifecycle hash chain; return (valid, root, entries)."""
+    def verify_audit_chain(
+        self,
+    ) -> tuple[bool, str, list[dict[str, Any]]]:
+        """Recompute the lifecycle hash chain; return (valid, root, entries).
+
+        Each entry gains ``signature_valid``: ``True``/``False`` when the
+        registry holds a signing key and a signature is stored, ``None``
+        otherwise. The head entry's flag is the chain's authenticity check —
+        a DB-only attacker can recompute hashes but not HMACs.
+        """
         events = self.audit_events()
         prev = GENESIS
         entries: list[dict[str, Any]] = []
@@ -598,7 +630,16 @@ class PromptRegistry:
             ).hexdigest()
             if row["prev_hash"] != prev or digest != row["hash"]:
                 valid = False
-            entries.append({**row, "recomputed_hash": digest})
+            stored_sig = str(row.get("sig") or "")
+            sig_valid: bool | None = None
+            if self._signing_key and stored_sig:
+                import hmac
+
+                sig_valid = hmac.compare_digest(stored_sig, self._sign(digest))
+            entries.append(
+                {**row, "recomputed_hash": digest,
+                 "signature_valid": sig_valid}
+            )
             prev = row["hash"]
         root = prev if events else GENESIS
         return valid, root, entries
