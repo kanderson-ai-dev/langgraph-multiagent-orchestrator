@@ -276,3 +276,72 @@ def test_reject_reason_surfaces_in_result(api_client: Any) -> None:
     assert any(
         m["sender"] == "human" for m in job["result"]["transcript"]
     )
+
+
+def test_zero_budget_escalates_before_any_paid_call(api_client: Any) -> None:
+    """A literal ``budget_usd=0`` is a *zero cap*, not "no cap": the job
+    escalates to review before the decider or any worker burns tokens."""
+    r = api_client.post(
+        "/api/v1/orchestration/reports",
+        json={"topic": "zero cap semantics", "budget_usd": 0},
+    )
+    assert r.status_code == 202
+    job = _wait_status(api_client, r.json()["job_id"], "awaiting_review")
+    assert job["cost_usd"] == 0.0
+    assert job["result"]["escalation_reason"] == "budget"
+    # No draft exists yet — the guided set must not offer approve.
+    assert "approve" not in job["result"]["allowed_actions"]
+    assert "fund" in job["result"]["allowed_actions"]
+
+
+def test_negative_budget_rejected(api_client: Any) -> None:
+    r = api_client.post(
+        "/api/v1/orchestration/reports",
+        json={"topic": "negative", "budget_usd": -1},
+    )
+    assert r.status_code == 422
+
+
+async def test_interrupt_chunk_forwards_guided_actions(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    """The SSE interrupt frame carries ``reason`` + ``allowed_actions`` so the
+    console can open the review modal on the event payload instead of polling
+    the persisted result for ~3s."""
+    from langgraph.types import Interrupt
+
+    settings = _settings()
+    db = str(tmp_path / "ev.sqlite")
+    graph = build_graph(
+        settings, llm=_stub_llm(verdict="revise"),
+        search=_FakeSearch(), scraper=_FakeScraper(),
+        checkpointer=MemorySaver(),
+    )
+    runner = JobRunner(graph, JobStore(db), UsageStore(db), settings)
+    sent: list[dict[str, Any]] = []
+
+    async def capture(job_id: str, event: dict[str, Any]) -> None:
+        sent.append(event)
+
+    monkeypatch.setattr(runner, "_emit", capture)
+    await runner._handle_chunk(
+        "j1",
+        {
+            "__interrupt__": [
+                Interrupt(
+                    value={
+                        "reason": "budget",
+                        "allowed_actions": ["fund", "fund_and_continue", "reject"],
+                    }
+                )
+            ]
+        },
+    )
+    assert sent == [
+        {
+            "node": "human_review",
+            "interrupt": True,
+            "reason": "budget",
+            "allowed_actions": ["fund", "fund_and_continue", "reject"],
+        }
+    ]

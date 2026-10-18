@@ -253,15 +253,24 @@ class JobRunner:
         for node, update in chunk.items():
             if node == "__interrupt__":
                 # The interrupt payload carries the real escalation reason
-                # (budget | debate_rounds) — surface it to SSE subscribers.
+                # (budget | debate_rounds) and the guided action set — surface
+                # both so SSE subscribers can open the review modal without
+                # polling for the persisted result.
                 reason = None
+                actions = None
                 intr = update[0] if isinstance(update, list | tuple) else update
                 val = getattr(intr, "value", None)
                 if isinstance(val, dict):
                     reason = val.get("reason")
+                    actions = val.get("allowed_actions")
                 await self._emit(
                     job_id,
-                    {"node": "human_review", "interrupt": True, "reason": reason},
+                    {
+                        "node": "human_review",
+                        "interrupt": True,
+                        "reason": reason,
+                        "allowed_actions": actions,
+                    },
                 )
                 continue
             msgs = update.get("transcript") if isinstance(update, dict) else None

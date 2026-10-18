@@ -87,7 +87,10 @@ function handleEvent(ev) {
     if (ev.interrupt) {
       feedEntry(ev.node, "Paused — awaiting human decision.", "escalation");
       refreshJobs();
-      fetchAndOpenHitl();
+      // The interrupt event carries the server's guided set — open the modal
+      // immediately; the persisted-result poll only runs as a fallback.
+      if (ev.allowed_actions) openHitl(ev.reason, ev.allowed_actions);
+      else fetchAndOpenHitl();
       return;
     }
     if (ev.messages && ev.messages.length) {
@@ -139,7 +142,12 @@ export async function attachJob(jobId) {
   $("#report-card").classList.add("hidden");
   $("#job-id").textContent = jobId;
   $("#pdf-link").classList.add("hidden");
-  setStatus("queued");
+  // Neutral placeholder until the fetch lands — claiming "queued" briefly is a
+  // lie for jobs that are already running or done.
+  const st = $("#job-status");
+  st.textContent = "…";
+  st.className = "status";
+  $("#review-btn").classList.add("hidden");
 
   const job = await api(`/orchestration/reports/${jobId}`);
   $("#job-topic").textContent = job.brief?.topic || "";

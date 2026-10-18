@@ -73,3 +73,40 @@ def test_configure_tracing_disabled_without_key(monkeypatch):
     s = Settings(langchain_tracing_v2=True, langchain_api_key=None)
     assert configure_tracing(s) is False
     assert "LANGCHAIN_API_KEY" not in os.environ
+
+
+def test_budget_fields_document_zero_cap_semantics() -> None:
+    """Both submission forms must tell the user what empty vs 0 means:
+    empty = no cap, 0 = zero cap (pauses before any paid call)."""
+    client = _client()
+    landing = client.get("/").text
+    console = client.get("/console/").text
+    assert "Leave empty for no cap" in landing
+    assert "0" in landing and "zero budget" in landing
+    assert "Empty = no cap" in console
+    assert "0 = zero budget" in console
+
+
+def test_forms_omit_budget_only_when_empty() -> None:
+    """The JS must omit ``budget_usd`` when the field is empty (no cap) but
+    still send a literal ``0`` (zero cap)."""
+    client = _client()
+    landing = client.get("/").text
+    jobs_js = client.get("/console/js/views/jobs.js").text
+    assert "Number.isNaN(budget)" in landing
+    assert "isNaN(parseFloat(f.budget_usd.value))" in jobs_js
+
+
+def test_console_opens_hitl_modal_from_interrupt_payload() -> None:
+    """jobs.js must consume ``allowed_actions`` from the interrupt SSE event —
+    the payload path is what removed the re-escalation modal window."""
+    js = _client().get("/console/js/views/jobs.js").text
+    assert "ev.allowed_actions" in js
+    assert "openHitl(ev.reason, ev.allowed_actions)" in js
+
+
+def test_evidence_chips_deduplicated() -> None:
+    """Duplicate manifest entries must not render duplicate evidence chips."""
+    js = _client().get("/console/js/views/report.js").text
+    assert "evidence_id" in js
+    assert "seen.add" in js

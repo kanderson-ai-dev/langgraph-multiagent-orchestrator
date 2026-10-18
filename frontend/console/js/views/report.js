@@ -98,7 +98,13 @@ function renderEvidence(manifest) {
   box.innerHTML = "";
   box.classList.toggle("hidden", !Array.isArray(items) || !items.length);
   if (!Array.isArray(items) || !items.length) return;
+  // The manifest may list the same sealed source more than once (e.g. a page
+  // reached via two queries) — one chip per distinct evidence id.
+  const seen = new Set();
   for (const s of items) {
+    const key = s.evidence_id || s.sha256 || s.url;
+    if (seen.has(key)) continue;
+    seen.add(key);
     const el = document.createElement("a");
     el.className = "chip chip-mono chip-evidence";
     el.textContent = `#${String(s.sha256 || "").slice(0, 12)}`;
