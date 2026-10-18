@@ -80,7 +80,8 @@ def test_citation_must_match_cited_source_only() -> None:
             ),
         ],
     )
-    kept, dropped, hashes = verify_citations(draft, ev)
+    kept, dropped, hashes, unknown = verify_citations(draft, ev)
     assert dropped == 2
+    assert unknown == 1  # only the phantom URL was never fetched
     assert kept == [draft.citations[2]]
     assert hashes == ["a" * 64]

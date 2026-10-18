@@ -70,7 +70,7 @@ def test_verify_citations_returns_source_hashes() -> None:
             Citation(claim="c2", quote="zzz not present", source_url=ev.url),
         ],
     )
-    kept, dropped, hashes = verify_citations(draft, [ev])
+    kept, dropped, hashes, _unknown = verify_citations(draft, [ev])
     assert len(kept) == 1 and dropped == 1
     assert hashes == [ev.sha256]
 

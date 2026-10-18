@@ -18,7 +18,7 @@ def assemble_report(state: dict[str, Any]) -> str | None:
         return None
     draft = drafts[-1]
     evidence = state.get("evidence", [])
-    kept, _dropped, hashes = verify_citations(draft, evidence)
+    kept, _dropped, hashes, _unknown = verify_citations(draft, evidence)
 
     parts = [f"# {draft.title}", "", draft.markdown.strip()]
     if kept:

@@ -36,6 +36,20 @@ from app.services.prompt_registry import PromptRegistry
 _SUPPORT_THRESHOLD = EDD_THRESHOLDS["citation_support_rate"]
 
 
+def _citation_feedback(dropped: int, unknown: int, rate: float) -> str:
+    """Reviewer feedback the Writer can act on — names the failure kind."""
+    base = (
+        f"{dropped} citation(s) could not be verified against the fetched "
+        f"source text (support rate {rate:.2f}); re-cite or remove them."
+    )
+    if unknown:
+        base += (
+            f" {unknown} of them cite URL(s) not in the evidence set — fix "
+            "the source URL to one that was actually fetched."
+        )
+    return base
+
+
 class Rubric(BaseModel):
     """Fixed-shape rubric — free-form ``dict`` fields are not valid in
     OpenAI strict structured outputs (``additionalProperties`` is banned)."""
@@ -57,12 +71,14 @@ class ReviewOutput(BaseModel):
 
 def verify_citations(
     draft: ReportDraft, evidence: list[EvidenceItem]
-) -> tuple[list[Citation], int, list[str]]:
-    """Split citations into (supported, dropped-count, source-hash) tuples.
+) -> tuple[list[Citation], int, list[str], int]:
+    """Split citations into (supported, dropped, hashes, unknown-urls).
 
     ``kept`` and ``source_hashes`` are aligned: each supported citation
     records the ``sha256`` of the evidence item that verified it (empty
-    string for pre-seal legacy items).
+    string for pre-seal legacy items). ``unknown`` counts the dropped
+    citations whose URL isn't in the evidence set at all — surfaced in the
+    reviewer feedback so a revision can fix the URL instead of re-quoting.
 
     A citation verifies only against the source it *cites* — never against
     pooled evidence text. A quote that exists in source B but is credited
@@ -72,6 +88,7 @@ def verify_citations(
     kept: list[Citation] = []
     source_hashes: list[str] = []
     dropped = 0
+    unknown = 0
     for c in draft.citations:
         item = by_url.get(c.source_url)
         if item is not None and citation_supported(c.quote, item.text):
@@ -79,7 +96,9 @@ def verify_citations(
             source_hashes.append(item.sha256)
         else:
             dropped += 1
-    return kept, dropped, source_hashes
+            if item is None:
+                unknown += 1
+    return kept, dropped, source_hashes, unknown
 
 
 class ReviewerWorker:
@@ -147,7 +166,7 @@ class ReviewerWorker:
         # Deterministic citation pre-check runs before the LLM call — a
         # draft that already fails verification will be revised anyway, so
         # spending tokens on the rubric is pure waste.
-        kept, dropped, _hashes = verify_citations(draft, evidence)
+        kept, dropped, _hashes, unknown = verify_citations(draft, evidence)
         DEBATE_ROUNDS_TOTAL.inc()
         rate = support_rate(len(kept), len(draft.citations))
 
@@ -157,9 +176,7 @@ class ReviewerWorker:
             and rate < _SUPPORT_THRESHOLD
         ):
             feedback = [
-                f"{dropped} citation(s) could not be verified against the "
-                f"fetched source text (support rate {rate:.2f}); re-cite or "
-                "remove them."
+                _citation_feedback(dropped, unknown, rate),
             ]
             verdict = ReviewVerdict(
                 draft_version=draft.version,
@@ -206,10 +223,7 @@ class ReviewerWorker:
         verdict_str: Verdict = "approve" if out.verdict == "approve" else "revise"
         feedback = list(out.feedback)
         if dropped:
-            feedback.append(
-                f"{dropped} citation(s) could not be verified against the fetched "
-                f"source text (support rate {rate:.2f}); re-cite or remove them."
-            )
+            feedback.append(_citation_feedback(dropped, unknown, rate))
             if rate < _SUPPORT_THRESHOLD:
                 verdict_str = "revise"  # measured quality gate, not vibes
 
