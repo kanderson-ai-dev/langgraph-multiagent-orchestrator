@@ -113,15 +113,25 @@ async def judge_report(
     judge_llm: Any,
     judge_prompt: Any = None,
 ) -> float:
-    """Grade a finished report with the judge model; returns its 1–5 score."""
+    """Grade a finished report with the judge model; returns its 1–5 score.
+
+    The call goes through ``tracked_structured`` so it records usage under
+    role ``judge`` whenever a tracker is bound (live runs). ``run_eval_case``
+    deliberately calls this *outside* the job tracker binding — like the
+    baseline's grader, the judge is evaluator machinery, not pipeline spend.
+    """
+    from app.core.cost_tracking import tracked_structured
+
     context: dict[str, Any] = {"prompt_name": "judge"}
     if judge_prompt is not None:
         context.update(
             prompt_version=judge_prompt.version,
             prompt_sha256=judge_prompt.sha256,
         )
-    out = await judge_llm.structured(
+    out = await tracked_structured(
+        judge_llm,
         JudgeOutput,
+        role="judge",
         system=judge_system,
         user=(
             f"Brief — topic: {brief.topic}; audience: {brief.audience}; "

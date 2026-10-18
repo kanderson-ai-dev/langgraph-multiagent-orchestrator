@@ -100,7 +100,6 @@ class WriterWorker:
             self._llm,
             DraftOutput,
             role=self.name,
-            model="",
             system=system.text,
             user=self._prompt(state),
             context={

@@ -173,17 +173,23 @@ async def tracked_structured(
     schema: type[Any],
     *,
     role: str,
-    model: str,
+    model: str = "",
     system: str,
     user: str,
     context: dict[str, Any] | None = None,
 ) -> Any:
     """Call ``llm.structured`` and record token/cost usage under ``role``.
 
+    ``model`` may be left empty — it then resolves from the LLM's own
+    ``model_name`` attribute (e.g. ``REVIEWER_MODEL`` overrides price as
+    themselves, not as the default chat model). Unknown/empty models fall
+    back to the configurable COST_*_PRICE_PER_1M settings.
+
     Real provider token counts ride back on ``context["token_usage"]``
     when the LLM reports them; the stub path estimates honestly
     (chars/4) — estimates are never presented as provider data.
     """
+    model = model or str(getattr(llm, "model_name", "") or "")
     started = time.monotonic()
     result = await llm.structured(schema, system=system, user=user, context=context)
     ctx = context or {}

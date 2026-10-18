@@ -109,7 +109,6 @@ class ResearcherWorker:
             self._llm,
             ResearchPlan,
             role=self.name,
-            model="",
             system=system.text,
             user=self._plan_prompt(brief, mandate),
             context={

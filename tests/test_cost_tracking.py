@@ -84,3 +84,34 @@ async def test_tracked_structured_records_usage(
     assert result.value == "ok"
     assert len(tracker.records) == 1
     assert tracker.records[0].prompt_tokens > 0
+
+
+async def test_tracked_structured_resolves_model_from_llm(
+    settings: Settings, tmp_path: pytest.TempPathFactory
+) -> None:
+    """Omitting ``model`` picks up the LLM's own ``model_name`` — a
+    REVIEWER_MODEL override must price as itself, not as the default."""
+    from pydantic import BaseModel
+
+    class Out(BaseModel):
+        value: str = "ok"
+
+    class NamedLLM(StubLLM):
+        model_name = "gpt-4o"
+
+    store = UsageStore(str(tmp_path / "u.sqlite"))
+    tracker = UsageTracker(
+        job_id="j3", workspace_id="ws-a", store=store, settings=settings
+    )
+    stub = NamedLLM()
+    stub.register("Out", lambda s, c: Out())
+
+    async with bind_tracker(tracker):
+        await tracked_structured(
+            stub, Out, role="reviewer",
+            system="sys prompt", user="user prompt",
+        )
+    rec = tracker.records[0]
+    assert rec.model == "gpt-4o"
+    # 1M-token sanity check through the price table, not the fallback pair.
+    assert tracker.compute_cost(1_000_000, 1_000_000, model=rec.model) == 12.5

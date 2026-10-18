@@ -52,7 +52,6 @@ def make_llm_decider(llm: StructuredLLM, prompts: PromptRegistry) -> RouterDecid
             llm,
             SupervisorRoute,
             role="supervisor",
-            model="",
             system=system.text,
             user="Pick the next worker (or FINISH).",
             context={

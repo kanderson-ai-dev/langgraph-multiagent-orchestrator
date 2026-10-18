@@ -39,8 +39,11 @@ class OpenAIStructuredLLM:
     def __init__(self, settings: Settings, *, model: str | None = None) -> None:
         from langchain_openai import ChatOpenAI
 
+        # Exposed so cost tracking can price the call against the real model
+        # name instead of falling back to the default price pair.
+        self.model_name = model or settings.chat_model_name
         self._model = ChatOpenAI(
-            model=model or settings.chat_model_name,
+            model=self.model_name,
             api_key=settings.openai_api_key,
             # Transient 429/5xx retry with exponential backoff — parallel jobs
             # can briefly saturate the org TPM limit mid-run.
@@ -103,6 +106,9 @@ class StubLLM:
     ``model_construct`` with field defaults, which is enough for graphs to
     run end-to-end without credentials.
     """
+
+    model_name = "stub"  # not a priced model — UsageTracker falls back to
+    # the configurable COST_*_PRICE_PER_1M settings for stub calls.
 
     def __init__(self, builders: dict[str, StubBuilder] | None = None) -> None:
         self._builders = builders or {}

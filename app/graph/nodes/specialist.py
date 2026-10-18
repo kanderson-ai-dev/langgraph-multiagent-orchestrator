@@ -82,7 +82,6 @@ class SpecialistWorker:
             self._llm,
             SpecialistAnalysis,
             role=self._name,
-            model="",
             system=system,
             user=self._prompt(state),
             context=context,

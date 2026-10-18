@@ -190,7 +190,6 @@ class ReviewerWorker:
             self._llm,
             ReviewOutput,
             role=self.name,
-            model="",
             system=system.text,
             user=self._prompt(brief, draft, kept),
             context={
