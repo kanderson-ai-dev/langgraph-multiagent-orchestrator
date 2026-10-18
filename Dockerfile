@@ -1,5 +1,23 @@
 # syntax=docker/dockerfile:1
-FROM python:3.13-slim
+
+# ── builder: resolve locked runtime deps, nothing ships from here ─────────────
+FROM python:3.13-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+# requirements.txt is an all-groups export (includes dev tools), so the image
+# resolves runtime-only deps straight from the lockfile instead.
+COPY pyproject.toml uv.lock ./
+RUN pip install uv \
+    && uv export --frozen --format requirements-txt --no-dev --no-hashes \
+       -o /build/requirements.txt \
+    && pip install --prefix=/install -r /build/requirements.txt
+
+# ── runtime: app + deps only — no uv, no build tools, non-root ────────────────
+FROM python:3.13-slim AS runtime
 
 LABEL org.opencontainers.image.authors="Kaarsten Anderson <contact@kaarstenanderson.com>" \
       maintainer="Kaarsten Anderson <contact@kaarstenanderson.com>"
@@ -11,15 +29,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install runtime deps first so the layer is cached independent of app code.
-# requirements.txt is an all-groups export (includes dev tools), so the image
-# resolves runtime-only deps straight from the lockfile instead.
-COPY pyproject.toml uv.lock ./
-RUN pip install uv \
-    && uv export --frozen --format requirements-txt --no-dev --no-hashes \
-       -o /tmp/requirements.txt \
-    && pip install -r /tmp/requirements.txt \
-    && pip uninstall -y uv
+# Runtime deps land in the interpreter's standard prefix — no PATH hacks.
+COPY --from=builder /install /usr/local
 
 COPY app/ app/
 COPY frontend/ frontend/

@@ -1,6 +1,9 @@
-# Optional example overrides — NOT loaded unless you ask for them.
+# Multi-replica overrides. NOTE: `docker compose` merges this file
+# automatically whenever it exists — `docker compose up` starts the Redis
+# service below too. To run the app alone, either delete/rename this file
+# or point at the base only:
 #
-#   docker compose -f docker-compose.yml -f docker-compose.override.yml up
+#   docker compose -f docker-compose.yml up
 #
 # Adds a Redis service for multi-replica deployments. With REDIS_URL set
 # the app auto-selects RedisRateLimiter + RedisEventBus so rate limits

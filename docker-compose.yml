@@ -15,6 +15,16 @@ services:
       ENVIRONMENT: production
     volumes:
       - orchestrator-data:/app/data
+    # Runtime hardening: read-only root fs (the /app/data volume stays
+    # writable — SQLite WAL journals live beside the DB), scratch /tmp,
+    # no capabilities, no privilege escalation.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
 volumes:
