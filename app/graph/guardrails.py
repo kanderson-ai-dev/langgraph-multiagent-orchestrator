@@ -17,10 +17,20 @@ _INJECTION_PATTERNS = [
     re.compile(r"ignore\s+(all\s+)?(previous|prior|above|earlier)\s+instructions", re.I),
     re.compile(r"(reveal|show|print|repeat)\s+(your|the)\s+(system\s+)?prompt", re.I),
     re.compile(r"you\s+are\s+now\s+(a|an|in)\b", re.I),
-    re.compile(r"\bDAN\b|jailbreak|do\s+anything\s+now", re.I),
+    # "DAN" is an acronym — kept case-sensitive so the name "Dan" in a brief
+    # is not a false positive; lowercase variants still trip "do anything now".
+    re.compile(r"\bDAN\b"),
+    re.compile(r"jailbreak|do\s+anything\s+now", re.I),
     re.compile(r"<\s*(system|instruction|prompt)\s*>", re.I),
     re.compile(r"exfiltrat|leak\s+(api\s+)?keys?|reveal\s+secrets?", re.I),
-    re.compile(r"base64|rot13\s+(decode|encode|this)", re.I),
+    # An encoding name alone is a legitimate topic ("base64 encoding in our
+    # API") — only block it next to a decode/encode imperative, either order.
+    re.compile(r"\b(?:base64|rot13)\s+(?:decode|encode|this)\b", re.I),
+    re.compile(
+        r"\b(?:decode|encode)\s+(?:this\s+|the\s+)?(?:as\s+|into\s+|a\s+)?"
+        r"(?:base64|rot13)\b",
+        re.I,
+    ),
 ]
 
 # Phrases embedded in hostile pages that look like instructions to the model.
@@ -89,6 +99,14 @@ def screen_brief(brief: object) -> GuardrailResult:
     if not isinstance(brief, Brief):
         return GuardrailResult(False, "invalid brief object")
     fields = " ".join(
-        [brief.topic, brief.audience, brief.tone, *brief.requirements]
+        [
+            brief.topic,
+            brief.audience,
+            brief.tone,
+            brief.language,
+            brief.tenant_context,
+            *brief.requirements,
+            *brief.source_urls,
+        ]
     )
     return screen_input(fields)
