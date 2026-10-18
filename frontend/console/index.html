@@ -16,6 +16,7 @@
     </div>
     <div class="topbar-right">
       <span id="ws-badge" class="chip chip-mono" title="Tenant workspace">ws: default</span>
+      <button id="auth-btn" class="btn btn-ghost" type="button">Sign in</button>
       <span id="health-dot" class="dot" title="API health"></span>
       <a href="/" class="link">← landing</a>
     </div>
@@ -273,6 +274,37 @@
         <button class="btn btn-ghost" data-action="edit">Request edits</button>
         <button class="btn btn-primary" data-action="approve">Approve report</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Auth modal — only relevant when the API enforces auth -->
+  <div id="auth-modal" class="modal-backdrop hidden">
+    <div class="modal card">
+      <h2 class="modal-title">Sign in</h2>
+      <p class="modal-sub">This deployment requires authentication. Sign in with admin credentials or paste a workspace API key.</p>
+      <p id="auth-error" class="modal-error hidden"></p>
+      <form id="auth-login-form">
+        <label class="field">
+          <span>Username</span>
+          <input id="auth-user" autocomplete="username" />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input id="auth-pass" type="password" autocomplete="current-password" />
+        </label>
+        <label class="field">
+          <span>Workspace <em>(optional)</em></span>
+          <input id="auth-ws" placeholder="default" />
+        </label>
+        <label class="field">
+          <span>…or workspace API key <em>(orx_…)</em></span>
+          <input id="auth-apikey" placeholder="orx_…" autocomplete="off" />
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost modal-dismiss" id="auth-dismiss">Cancel</button>
+          <button type="submit" class="btn btn-primary">Sign in</button>
+        </div>
+      </form>
     </div>
   </div>
 

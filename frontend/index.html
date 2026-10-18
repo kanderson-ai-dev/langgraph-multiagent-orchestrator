@@ -224,11 +224,19 @@
       const budget = parseFloat(form.budget_usd.value);
       if (!Number.isNaN(budget)) body.budget_usd = budget;
       try {
+        // If the operator signed in at /console (same-origin storage), the
+        // Bearer token carries over — needed only when the API enforces auth.
+        const headers = { "Content-Type": "application/json" };
+        const token = localStorage.getItem("orx_token");
+        if (token) headers.Authorization = `Bearer ${token}`;
         const res = await fetch("/api/v1/orchestration/reports", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify(body),
         });
+        if (res.status === 401) {
+          throw new Error("401 — this deployment requires auth; sign in at /console first");
+        }
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
         const job = await res.json();
         window.location.href = `/console/?job=${encodeURIComponent(job.job_id)}`;

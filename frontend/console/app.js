@@ -13,6 +13,7 @@ import { initPromptsView, loadRegistry } from "./js/views/prompts.js";
 import { initPerformanceView, loadPerformance } from "./js/views/performance.js";
 import { initAuditView, loadJobOptions } from "./js/views/audit.js";
 import { initReportView } from "./js/views/report.js";
+import { initAuth, openAuthModal } from "./js/auth.js";
 import { applyBranding } from "./js/branding.js";
 
 /* ── tab bar ────────────────────────────────────────────────────────── */
@@ -49,7 +50,13 @@ initPromptsView();
 initPerformanceView();
 initAuditView();
 initReportView();
+initAuth();
 applyBranding();
+
+/* Any API call answering 401 opens the sign-in modal — a stale token or a
+ * deployment with auth enabled lands the operator here instead of failing
+ * silently. */
+window.addEventListener("orx:unauthorized", openAuthModal);
 
 fetch("/health/ready")
   .then((r) => $("#health-dot").classList.add(r.ok ? "ok" : "bad"))
