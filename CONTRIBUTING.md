@@ -23,3 +23,20 @@ uv run uvicorn app.main:app --reload
 - Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`).
 - Never commit secrets. `.env`, `data/*.sqlite`, and internal planning docs are
   gitignored.
+
+## Verify before committing
+
+```bash
+uv run ruff check .                                   # lint
+uv run pytest -q                                      # full suite, offline
+uv run pytest --cov=app --cov-report=term-missing     # coverage >= 85%
+uv run mypy --strict app/                             # 0 errors
+uv run python -m evaluation.run_eval                  # offline EDD gate
+gitleaks detect                                       # no secrets in history
+uv run pip-audit --strict                             # after dependency changes
+uv lock --check                                       # after touching uv.lock
+docker build -t orchestrator:check .                  # after Dockerfile/compose changes
+```
+
+On Windows, bare `python`/`pytest` may be an older Python — always go through
+`uv run`.

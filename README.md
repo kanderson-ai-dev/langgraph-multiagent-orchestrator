@@ -63,15 +63,17 @@ the standard of a paid engagement, not a portfolio toy.
   termination is proven by a dedicated test, not by luck.
 - 🔏 **Tamper-evident delivery.** Every transcript entry joins a SHA-256
   hash chain; the report carries its `audit_root`, and
-  `GET /reports/{id}/audit` lets anyone re-verify the chain. For B2B
-  compliance work, "who said what and when" is cryptographic, not anecdotal.
+  `GET /reports/{id}/audit` lets anyone re-verify the chain. Set
+  `AUDIT_SIGNING_KEY` and the chain tip is HMAC-signed — a DB-only
+  attacker can recompute hashes but not the MAC
+  ([ADR 0005](docs/adr/0005-audit-signing.md)).
 - 🧑‍⚖️ **Honest human-in-the-loop.** A real LangGraph `interrupt()` on a
   SQLite checkpointer — jobs pause at `awaiting_review`, survive restarts,
   and resume with `Command(resume=...)`. The UI shows *why* it escalated
   (LLM budget vs. debate rounds) and adapts its actions accordingly.
 - 🏢 **Multi-tenant from day one.** `workspace_id` scopes every job, event
   and report — one tenant can never read another's work.
-- 🧪 **CI green with zero secrets.** 354 tests, 92% coverage on `app/`,
+- 🧪 **CI green with zero secrets.** 415 tests, 92% coverage on `app/`,
   `mypy --strict`, a browser E2E smoke test — all runnable offline via a
   deterministic `StubLLM` and fixture-based tools. `docker compose up` works
   with no credentials at all.
@@ -190,9 +192,14 @@ Multi-tenancy is enforced by *role × workspace*:
 
 `POST /api/v1/workspaces` + `/members` + `/api-keys` are the admin
 surface; JWT sessions resolve `role` from the `members` table, and API
-keys carry their role inline. Cross-tenant probes return `404` — resource
-existence is not leaked. The dev-mode bootstrap keeps local ergonomics:
-with no `JWT_SECRET_KEY`, every request is a default-workspace admin.
+keys carry their role inline. Members can hold their own bcrypt password
+(set by an admin) — the console keeps the token in `sessionStorage`
+unless "Remember me" opts into `localStorage`, and `POST /auth/logout`
+revokes the `jti` server-side
+([ADR 0006](docs/adr/0006-browser-token-storage.md)). Cross-tenant
+probes return `404` — resource existence is not leaked. The dev-mode
+bootstrap keeps local ergonomics: with no `JWT_SECRET_KEY`, every
+request is a default-workspace admin.
 
 ---
 
@@ -314,6 +321,7 @@ determinism, the live run proves quality.
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/v1/auth/login` | Issue a short-lived JWT (rate-limited; only when auth is configured) |
+| `POST /api/v1/auth/logout` | Revoke the caller's `jti` server-side — real sign-out, not just deleting browser state |
 | `POST /api/v1/orchestration/reports` | Submit a report brief → `202` + job record |
 | `GET /api/v1/orchestration/reports` | List jobs (workspace-scoped) |
 | `GET /api/v1/orchestration/reports/{id}` | Poll status, team, cost and result |
@@ -338,6 +346,7 @@ determinism, the live run proves quality.
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/v1/workspaces` `/{id}/members` `/{id}/api-keys` | Workspace administration (admin-only) |
+| `PUT /api/v1/workspaces/{id}/members/{subject}/password` | Set/rotate a member's login password (admin-only) |
 | `GET /api/v1/dashboard/summary` `/performance` | Workspace cost/token/latency + p50/p95 and human-vs-agent comparison |
 | `POST /api/v1/feedback` · `GET /api/v1/feedback` `/export` | Report feedback queue (write: any member; read/export: admin) |
 | `GET /api/v1/config/ui` | White-label config the frontends apply (`UI_*` envs) |
@@ -506,7 +515,7 @@ evaluation/            # EDD dataset, evaluators, run_eval, scorecards,
 frontend/              # `/` landing (Tailwind CDN) + `/console` operator UI
                        # (ES modules: views/{jobs,report,review,prompts,
                        #  performance,audit}.js)
-tests/                 # 354 tests — offline by default, incl. browser E2E
+tests/                 # 415 tests — offline by default, incl. browser E2E
 docs/                  # adr/, eval/, observability/ (Grafana), ui-qa/,
                        # functional-qa/, screenshots/
 scripts/               # record_demo.py (GIF), capture_screenshots.py,
@@ -520,7 +529,7 @@ scripts/               # record_demo.py (GIF), capture_screenshots.py,
 ```bash
 ruff check .                                            # lint
 mypy --strict app/                                      # types (0 errors)
-pytest -v --cov=app                                     # 354 tests, offline, 92%
+pytest -v --cov=app                                     # 415 tests, offline, 92%
 uv run --with playwright pytest tests/test_frontend_e2e.py  # browser E2E
 uv run python -m evaluation.run_eval                    # EDD quality gate
 uv run python -m evaluation.latency_bench               # p50/p95 bench (live creds)
