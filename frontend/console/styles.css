@@ -63,7 +63,7 @@ code, .font-mono { font-family: var(--mono); }
 
 /* Layout */
 .layout {
-  display: grid; grid-template-columns: 320px 1fr; gap: 16px;
+  display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px;
   max-width: 1400px; margin: 0 auto; padding: 16px 20px;
   align-items: start;
 }
@@ -82,10 +82,10 @@ code, .font-mono { font-family: var(--mono); }
 .field { display: block; margin-bottom: 12px; }
 .field > span { display: block; font-size: 12px; font-weight: 500; margin-bottom: 5px; }
 .field em { color: var(--muted); font-style: normal; font-weight: 400; }
-.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 
 input, select, textarea {
-  width: 100%; background: var(--ink); color: var(--text);
+  width: 100%; min-width: 0; background: var(--ink); color: var(--text);
   border: 1px solid var(--line); border-radius: 8px;
   padding: 8px 10px; font: inherit; font-size: 13px;
 }
@@ -111,7 +111,7 @@ textarea { resize: vertical; }
 .btn-danger:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
 
 /* Stats */
-.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stats { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 .stat { background: var(--panel-2); border-radius: 8px; padding: 10px; }
 .stat-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 .stat-value { display: block; font: 600 16px var(--mono); margin-top: 4px; }
@@ -165,7 +165,7 @@ textarea { resize: vertical; }
 .status.failed, .status.blocked { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 
 /* Columns */
-.columns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .columns.single { grid-template-columns: 1fr; }
 
 /* Feed — stays pinned while the page scrolls */
@@ -253,7 +253,7 @@ textarea { resize: vertical; }
 .toast.error { border-color: var(--danger); color: var(--danger); }
 
 @media (max-width: 980px) {
-  .layout { grid-template-columns: 1fr; }
+  .layout { grid-template-columns: minmax(0, 1fr); }
   .sidebar { position: static; }
   .columns { grid-template-columns: 1fr; }
 }
@@ -283,7 +283,8 @@ a.chip-evidence:hover { background: rgba(34, 197, 94, .08); }
 .card-head .card-title { margin: 0; }
 
 /* ── Prompt registry tab ────────────────────────────────────────────── */
-.prompts-layout { display: grid; gap: 14px; }
+.prompts-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.table-wrap { overflow-x: auto; }
 .prompt-names { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
 .prompt-name {
   display: flex; justify-content: space-between; align-items: center;

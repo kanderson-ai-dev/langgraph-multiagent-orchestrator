@@ -139,9 +139,12 @@ def test_runner_state_freed_after_completion(tmp_path: Any) -> None:
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             jobs = client.get("/api/v1/orchestration/reports").json()
-            if jobs and all(
+            done = jobs and all(
                 j["status"] in ("done", "failed", "blocked") for j in jobs
-            ) and len(jobs) == 3:
+            ) and len(jobs) == 3
+            # A job's status lands terminal before its task's finally-block
+            # reaps the runner dicts — poll for both, not just the first.
+            if done and not runner._tasks:
                 break
             time.sleep(0.1)
         else:
