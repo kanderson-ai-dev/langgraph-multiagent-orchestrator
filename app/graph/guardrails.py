@@ -15,6 +15,14 @@ from dataclasses import dataclass
 # Injection / jailbreak signals on user input (compiled once).
 _INJECTION_PATTERNS = [
     re.compile(r"ignore\s+(all\s+)?(previous|prior|above|earlier)\s+instructions", re.I),
+    # "Ignore previous instructions" — ES / FR / DE / PT. The phrases are
+    # specific enough that legitimate briefs (which may mention
+    # "instrucciones" or "prompt") do not collide.
+    re.compile(r"ignora\s+(todas\s+)?las\s+instrucciones\s+(anteriores|previas)", re.I),
+    re.compile(r"ignorer?\s+(toutes?\s+)?les?\s+instructions\s+pr[ée]c[ée]dentes", re.I),
+    re.compile(r"ignoriere?\s+(alle\s+)?(vorherigen|bisherigen)\s+anweisungen", re.I),
+    re.compile(r"ignore\s+(todas\s+)?as\s+instru[çc][õo]es\s+anteriores", re.I),
+    re.compile(r"(revela|revelar)\s+(el|o|tu|seu)\s+(prompt|sistema)", re.I),
     re.compile(r"(reveal|show|print|repeat)\s+(your|the)\s+(system\s+)?prompt", re.I),
     re.compile(r"you\s+are\s+now\s+(a|an|in)\b", re.I),
     # "DAN" is an acronym — kept case-sensitive so the name "Dan" in a brief

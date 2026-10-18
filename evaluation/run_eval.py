@@ -97,6 +97,12 @@ def build_scorecard(
         "prompt_overrides": overrides,
         "cases": results,
         "mode": mode,
+        "note": (
+            "Offline deterministic run (stub LLM + fixture tools): these "
+            "numbers validate pipeline determinism and gate thresholds, "
+            "not live model quality. Live evidence lives in README's "
+            "live-evaluation section."
+        ),
     }
 
 
@@ -183,7 +189,7 @@ async def _main() -> int:
                 return 2
         registry = registry.with_overrides(overrides)
 
-    mode = "offline (stub LLM + fixture tools)"
+    mode = "offline-stub"
     results = [await _run_case(c, settings, registry) for c in DATASET]
     metrics = aggregate_metrics(results)
     baseline = aggregate_baseline(results)

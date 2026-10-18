@@ -59,6 +59,7 @@ async def eval_latest() -> JSONResponse:
             "model": data.get("model"),
             "judge_model": data.get("judge_model"),
             "mode": data.get("mode"),
+            "note": data.get("note"),
             "metrics": data.get("metrics"),
             "gates": data.get("gates"),
             "thresholds": data.get("thresholds"),

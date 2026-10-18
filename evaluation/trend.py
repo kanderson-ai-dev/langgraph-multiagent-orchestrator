@@ -71,6 +71,7 @@ def build_history_row(
         "metrics": metrics,
         "baseline_metrics": baseline,
         "avg_cost_usd": metrics.get("avg_cost_usd", 0.0),
+        "judge_cost_usd": metrics.get("judge_cost_usd", 0.0),
         "baseline_cost_usd": baseline.get("avg_cost_usd", 0.0),
         "p50_latency_seconds": _percentile(latencies, 0.50),
         "p95_latency_seconds": _percentile(latencies, 0.95),
@@ -108,7 +109,7 @@ def render_trend(
     header = (
         "| Run (UTC) | SHA | mode | prompts | model | judge_model |"
         + "".join(f" {label} |" for _key, label, _d in _METRIC_COLS)
-        + " cost_avg | p50_s | p95_s | base_support | base_cost |"
+        + " cost_avg | judge_cost | p50_s | p95_s | base_support | base_cost |"
     )
     lines = [
         "# EDD Trend History",
@@ -126,12 +127,15 @@ def render_trend(
             cells.append(f"{value:.{digits}f}" if isinstance(value, float) else "n/a")
         base_support = row.get("baseline_metrics", {}).get("citation_support_rate")
         base_cell = f"{base_support:.3f}" if isinstance(base_support, float) else "n/a"
+        judge_cost = row.get("judge_cost_usd")
+        judge_cell = f"{judge_cost:.6f}" if isinstance(judge_cost, float) else "n/a"
         lines.append(
             f"| {row['run_at']} | {row.get('git_sha', '?')} | {row.get('mode', '?')} "
             f"| {_pv_cell(row.get('prompt_versions', {}))} "
             f"| {row.get('model', '?')} | {row.get('judge_model', '?')} "
             f"| {' | '.join(cells)} "
             f"| {row.get('avg_cost_usd', 0.0):.6f} "
+            f"| {judge_cell} "
             f"| {row.get('p50_latency_seconds', 0.0):.2f} "
             f"| {row.get('p95_latency_seconds', 0.0):.2f} "
             f"| {base_cell} | {row.get('baseline_cost_usd', 0.0):.6f} |"

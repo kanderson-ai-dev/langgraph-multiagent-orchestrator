@@ -56,6 +56,9 @@ class EvalCaseLike(Protocol):
     tone: str
     requirements: list[str]
     expect_blocked: bool
+    report_type: str = "general"
+    language: str = "en"
+    tenant_context: str = ""
 
 
 _FIXTURE_HTML = (
@@ -326,22 +329,32 @@ async def run_eval_case(
                     )
 
     # LLM-as-judge on the finished report — a distinct model when
-    # credentials allow; a deterministic stub builder offline.
+    # credentials allow; a deterministic stub builder offline. Its cost is
+    # tracked under a *separate* throwaway tracker so the scorecard can
+    # report judge spend honestly without mixing it into pipeline spend.
     judge_llm = judge_llm or build_judge_llm(settings)
     if isinstance(judge_llm, StubLLM):
         judge_llm.register_default("JudgeOutput", _judge_builder)
     report = out.get("final_report")
     judge_prompt = registry.render("judge")
-    judge_score = (
-        await judge_report(
-            brief, report,
-            judge_system=judge_prompt.text,
-            judge_llm=judge_llm,
-            judge_prompt=judge_prompt,
+    with tempfile.TemporaryDirectory() as jtmp:
+        judge_tracker = UsageTracker(
+            job_id=job_id,
+            workspace_id="eval",
+            store=UsageStore(str(Path(jtmp) / "judge.sqlite")),
+            settings=settings,
         )
-        if report
-        else 0.0
-    )
+        async with bind_tracker(judge_tracker):
+            judge_score = (
+                await judge_report(
+                    brief, report,
+                    judge_system=judge_prompt.text,
+                    judge_llm=judge_llm,
+                    judge_prompt=judge_prompt,
+                )
+                if report
+                else 0.0
+            )
     metrics: dict[str, Any] = {
         "case_id": case_id,
         "status": out.get("status"),
@@ -355,6 +368,7 @@ async def run_eval_case(
         "debate_rounds": out.get("debate_round", 0),
         "duration_seconds": round(time.monotonic() - started, 3),
         "cost_usd": round(tracker.total_cost, 8),
+        "judge_cost_usd": round(judge_tracker.total_cost, 8),
         "llm_calls": len(tracker.records),
     }
     return metrics, out
@@ -366,6 +380,9 @@ def brief_for_case(case: EvalCaseLike) -> Brief:
         audience=case.audience,
         tone=case.tone,
         requirements=case.requirements,
+        report_type=case.report_type,  # type: ignore[arg-type]
+        language=case.language,
+        tenant_context=case.tenant_context,
     )
 
 
@@ -399,6 +416,19 @@ def aggregate_metrics(results: list[dict[str, Any]]) -> dict[str, float]:
         ),
         "avg_llm_calls": (
             sum(r["llm_calls"] for r in normal) / len(normal) if normal else 0.0
+        ),
+        # Judge spend is evaluator machinery, not pipeline spend — reported
+        # separately so neither number can be misread as the other.
+        "judge_cost_usd": (
+            sum(r["judge_cost_usd"] for r in normal) / len(normal)
+            if normal
+            else 0.0
+        ),
+        "total_cost_usd_incl_judge": (
+            sum(r["cost_usd"] + r["judge_cost_usd"] for r in normal)
+            / len(normal)
+            if normal
+            else 0.0
         ),
     }
 
