@@ -71,7 +71,7 @@ the standard of a paid engagement, not a portfolio toy.
   (LLM budget vs. debate rounds) and adapts its actions accordingly.
 - 🏢 **Multi-tenant from day one.** `workspace_id` scopes every job, event
   and report — one tenant can never read another's work.
-- 🧪 **CI green with zero secrets.** 307 tests, 91% coverage on `app/`,
+- 🧪 **CI green with zero secrets.** 323 tests, 91% coverage on `app/`,
   `mypy --strict`, a browser E2E smoke test — all runnable offline via a
   deterministic `StubLLM` and fixture-based tools. `docker compose up` works
   with no credentials at all.
@@ -471,7 +471,7 @@ evaluation/            # EDD dataset, evaluators, run_eval, scorecards,
 frontend/              # `/` landing (Tailwind CDN) + `/console` operator UI
                        # (ES modules: views/{jobs,report,review,prompts,
                        #  performance,audit}.js)
-tests/                 # 307 tests — offline by default, incl. browser E2E
+tests/                 # 323 tests — offline by default, incl. browser E2E
 docs/                  # adr/, eval/, observability/ (Grafana), ui-qa/,
                        # functional-qa/, screenshots/
 scripts/               # record_demo.py (GIF), capture_screenshots.py,
@@ -485,7 +485,7 @@ scripts/               # record_demo.py (GIF), capture_screenshots.py,
 ```bash
 ruff check .                                            # lint
 mypy --strict app/                                      # types (0 errors)
-pytest -v --cov=app                                     # 307 tests, offline, 91%
+pytest -v --cov=app                                     # 323 tests, offline, 91%
 uv run --with playwright pytest tests/test_frontend_e2e.py  # browser E2E
 uv run python -m evaluation.run_eval                    # EDD quality gate
 uv run python -m evaluation.latency_bench               # p50/p95 bench (live creds)

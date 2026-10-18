@@ -39,11 +39,11 @@ content** gathered by the Researcher agent.
 
 ## Evaluation cassette policy
 
-Recorded live eval runs (`evaluation/cassettes/*.json`) contain real
-scraped HTML and LLM payloads. Before a cassette is committed:
+Recorded live eval runs (`tests/cassettes/*.yaml` + `*_search.json`) contain
+real scraped HTML and LLM payloads. Before a cassette is committed:
 
-1. It is generated with `record_live.py` — a dedicated script, never
-   hand-edited.
+1. It is generated with `evaluation/record_cassettes.py` — a dedicated
+   script, never hand-edited.
 2. `gitleaks detect` runs over the diff — caught once already (an
    Application Insights `instrumentationkey` embedded in third-party
    HTML, exempted via `.gitleaksignore` as a verified non-secret).
@@ -81,7 +81,7 @@ scraped HTML and LLM payloads. Before a cassette is committed:
 - **A03 Injection** — parameterized SQL (aiosqlite), no raw interpolation.
 - **A05 Security Misconfiguration** — security headers
   (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`),
-  non-root Docker image (Phase 12).
+  non-root Docker image.
 - **A07 Identification/Auth Failures** — generic 401 responses (never
   distinguish "user not found" vs "wrong password"), bcrypt, short-lived JWT.
 - **A09 Logging Failures** — structured logs with automatic secret redaction.
