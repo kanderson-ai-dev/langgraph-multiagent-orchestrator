@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
@@ -225,6 +225,32 @@ async def diff_versions(
     except PromptRegistryError as exc:
         raise _registry_error(exc) from exc
     return {"name": name, "from": a, "to": b, "diff": diff}
+
+
+@router.get("/{name}/versions/{version}/yaml", include_in_schema=False)
+async def export_version_yaml(
+    name: str,
+    version: int,
+    registry: PromptRegistry = Depends(get_prompt_registry),
+    ctx: RequestContext = Depends(require_role("viewer")),
+) -> Response:
+    """Download a version as a ``vN.yaml`` file for git review.
+
+    Runtime-created candidates live only in SQLite; exporting produces a
+    seed-shaped document so a reviewed prompt can be committed under
+    ``prompts/<name>/`` and adopted at the next startup.
+    """
+    try:
+        body = registry.export_yaml(name, version)
+    except PromptRegistryError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=body,
+        media_type="text/yaml",
+        headers={
+            "Content-Disposition": f'attachment; filename="v{version}.yaml"'
+        },
+    )
 
 
 # ─── candidates ──────────────────────────────────────────────────────────────

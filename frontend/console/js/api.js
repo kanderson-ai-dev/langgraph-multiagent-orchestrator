@@ -3,7 +3,7 @@
  * has auth enabled the console sends a Bearer credential (JWT from
  * /auth/login or an `orx_…` workspace API key) stored by js/auth.js. */
 
-const API = "/api/v1";
+export const API = "/api/v1";
 const TOKEN_KEY = "orx_token";
 
 // Tokens default to sessionStorage (tab-scoped, cleared when the tab

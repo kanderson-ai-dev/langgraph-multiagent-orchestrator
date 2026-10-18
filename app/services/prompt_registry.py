@@ -12,7 +12,10 @@ falls back to stale constants):
 
 - declared ``variables`` == ``{placeholders}`` found in the template;
 - versions are unique and contiguous per name (1..N, no gaps);
-- exactly one ``promoted`` version per name.
+- exactly one ``promoted`` version per name;
+- a committed ``vN.yaml`` meeting a ``source='runtime'`` row must carry
+  the same template hash to be adopted as the new source — a different
+  hash aborts startup instead of silently shadowing either text.
 
 The registry is thread-safe for the low write volume it sees (a
 ``threading.Lock`` guards mutations and audit-chain appends).
@@ -248,8 +251,29 @@ class PromptRegistry:
     def _sync_yaml(
         conn: sqlite3.Connection, versions: dict[tuple[str, int], PromptVersion]
     ) -> None:
-        """Upsert seed content; runtime status overrides always win."""
+        """Upsert seed content; runtime status overrides always win.
+
+        Collision rule when a committed ``vN.yaml`` meets an existing
+        ``source='runtime'`` row: identical template hashes simply adopt
+        the file as the new source; a *different* hash fails fast — the
+        operator must resolve which body of prompt text is real instead
+        of silently shadowing one.
+        """
         for pv in versions.values():
+            row = conn.execute(
+                "SELECT sha256, source FROM prompt_versions"
+                " WHERE name=? AND version=?",
+                (pv.name, pv.version),
+            ).fetchone()
+            if row is not None and row["source"] == "runtime":
+                existing = row["sha256"]
+                if existing != pv.sha256:
+                    raise PromptRegistryError(
+                        f"{pv.name} v{pv.version}: YAML seed conflicts with "
+                        "the runtime-created version (different template "
+                        "hash). Delete the DB row or rename the file — "
+                        "refusing to pick one silently."
+                    )
             conn.execute(
                 "INSERT INTO prompt_versions (name, version, status, author,"
                 " created_at, target_model, variables, changelog, template,"
@@ -390,6 +414,34 @@ class PromptRegistry:
         if pv is None:
             raise PromptRegistryError(f"{name} v{version}: not found")
         return pv
+
+    def export_yaml(self, name: str, version: int) -> str:
+        """Render a stored version as a review-ready ``vN.yaml`` document.
+
+        The field order and shape match the git seeds, so the output of
+        ``scripts/export_prompt.py`` can be committed and reloaded
+        byte-for-byte semantically. Lifecycle nuance: ``promoted`` exports
+        as ``promoted``; every other runtime state exports as
+        ``candidate`` — a file under review, never silently shipped.
+        """
+        pv = self.get(name, version)
+        created = pv.created_at.isoformat().replace("+00:00", "Z")
+        doc = {
+            "name": pv.name,
+            "version": pv.version,
+            "status": (
+                PromptStatus.PROMOTED.value
+                if pv.status == PromptStatus.PROMOTED
+                else PromptStatus.CANDIDATE.value
+            ),
+            "author": pv.author,
+            "created_at": created,
+            "target_model": pv.target_model,
+            "variables": list(pv.variables),
+            "changelog": pv.changelog,
+            "template": pv.template,
+        }
+        return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
 
     def render(
         self, name: str, *, version: int | None = None, **variables: Any

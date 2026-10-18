@@ -146,7 +146,19 @@ seed → draft → candidate ──ab-test──▶ promoted ──▶ retired
 - **Tamper-evident lifecycle**: every mutation appends to the same
   hash-chain family as job transcripts — prompt evolution is auditable.
 - **Console tab**: versions, diffs, candidate editor, A/B runs,
-  promote/rollback — all driven by `GET/POST /api/v1/prompts/*`.
+  promote/rollback, per-version YAML export — all driven by
+  `GET/POST /api/v1/prompts/*`.
+- **Two-path creation**: `POST /prompts/{name}/candidates` writes a
+  `source='runtime'` row in SQLite only. To bring a reviewed candidate
+  under git, export it —
+  `GET /prompts/{name}/versions/{v}/yaml` (`text/yaml`, viewer role),
+  the console's `yaml` button, or
+  `uv run python scripts/export_prompt.py <name> <v> --write`
+  (never overwrites an existing file) — and commit the produced
+  `prompts/<name>/v<v>.yaml`. On the next startup the file is adopted:
+  an identical template hash flips the row to `source='yaml'`; a
+  **different** hash fails fast with a conflict error — a committed seed
+  never silently shadows a runtime version (or vice versa).
 
 ![Prompt Registry — versions, diff and promotion gate](docs/screenshots/console-prompt-registry.png)
 
@@ -296,6 +308,7 @@ determinism, the live run proves quality.
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/v1/prompts` `/{name}` `/{name}/diff` | Versions, detail, rendered diff |
+| `GET /api/v1/prompts/{name}/versions/{v}/yaml` | Export a version as a seed-shaped YAML file |
 | `POST /api/v1/prompts/{name}/candidates` | Register a candidate version |
 | `POST /api/v1/prompts/{name}/ab-test` `/promote` `/rollback` | Measured A/B → gated promotion / instant rollback |
 | `GET /api/v1/prompts/ab-runs/{run_id}` `/audit` | A/B results, lifecycle audit chain |

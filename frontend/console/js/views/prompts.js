@@ -3,7 +3,7 @@
  * (with override reason) and rollback. All mutations are admin-gated
  * server-side; the UI surfaces the real API errors. */
 
-import { api, apiPost } from "../api.js";
+import { API, api, apiPost, ApiError, authHeaders } from "../api.js";
 import { $, escapeHtml, toast } from "../util.js";
 
 let registry = {}; // name → versions[]
@@ -81,7 +81,14 @@ function renderVersions() {
       `<td class="font-mono">v${v.version}</td>` +
       `<td><span class="status sm pv-${v.status}">${escapeHtml(v.status)}</span></td>` +
       `<td>${escapeHtml(v.changelog || "—")}</td>` +
-      `<td class="font-mono" title="${escapeHtml(v.sha256)}">${escapeHtml(String(v.sha256).slice(0, 10))}…</td>`;
+      `<td class="font-mono" title="${escapeHtml(v.sha256)}">${escapeHtml(String(v.sha256).slice(0, 10))}…</td>` +
+      `<td><button type="button" class="btn ghost sm export-yaml" ` +
+      `data-version="${v.version}" title="Download v${v.version} as a ` +
+      `seed-shaped YAML file for git review">yaml</button></td>`;
+    tr.querySelector(".export-yaml").addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      exportVersion(current.name, v.version);
+    });
     tr.addEventListener("click", () => {
       current.version = v.version;
       $("#candidate-template").value = v.template || "";
@@ -89,6 +96,24 @@ function renderVersions() {
       tr.classList.add("active");
     });
     tbody.appendChild(tr);
+  }
+}
+
+async function exportVersion(name, version) {
+  try {
+    const res = await fetch(
+      `${API}/prompts/${encodeURIComponent(name)}/versions/${version}/yaml`,
+      { headers: authHeaders() });
+    if (!res.ok) throw new ApiError(res.status, (await res.text()) || "export failed");
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${name}-v${version}.yaml`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(`Exported ${name} v${version} — commit it under prompts/${name}/`);
+  } catch (ex) {
+    toast(`Export failed: ${ex.message}`, true);
   }
 }
 
