@@ -278,6 +278,26 @@ human approves via `interrupt()` (`hitl_resumes` = 1.00). Reports still
 deliver; convergence-without-escalation is the open quality gap the A/B
 gate exists to close.
 
+**Prompt A/B, 2026-10-18** (baseline run `writer-v1-f17e892-2026-10-18-1957`;
+writer **v3** + reviewer **v2** candidates on the same 7 quality briefs,
+same driver, per-case evaluators):
+
+| Metric | v1 (promoted) | v3+v2 (candidates) | Gate |
+|---|---|---|---|
+| Convergence (approved ≤3 rounds) | 0/7 = 0.000 | 2/7 ≈ 0.286 | ≥ 0.85 |
+| Citation support | ≈ 0.467 | ≈ 0.614 | ≥ 0.90 |
+| Reviewer rubric (1–5) | 3.00 | ≈ 3.57 | ≥ 4.0 |
+| Judge score (1–5) | ≈ 3.86 | ≈ 4.14 | ≥ 4.0 |
+| Avg cost / job | ≈ $0.0073 | ≈ $0.0060 | ≤ $0.08 |
+
+The candidates improve every metric — convergence moves off zero, judge
+clears 4.0, cost stays far under budget — but citation support at ≈0.61
+is still far below the 0.90 gate, so **neither candidate was promoted**.
+The two arms were measured with the same in-process driver; the Langfuse
+run above records the baseline arm (per-item retrieval is currently
+limited by Langfuse API migration, so the local per-case numbers are the
+record of truth).
+
 Live surfaces publish **measured results only** — there is deliberately
 no stub fallback for `--langsmith-live`/`--langfuse-live` (see
 [ADR 0004](docs/adr/0004-live-scorecard-no-offline.md)). That is why a
@@ -555,11 +575,14 @@ is single-node).
 
 ## Known limitations & next steps
 
-- **Live debate convergence is below target**: the live Langfuse
-  experiment showed the Reviewer exhausting rounds on some briefs
-  (`awaiting_review` instead of converged) — the offline stub cannot
-  reproduce this. Next step is prompt iteration on the writer/reviewer
-  pair via the registry's A/B gate, not a routing change.
+- **Live debate convergence is below target**: the first live A/B
+  (writer v3 + reviewer v2 vs promoted v1, same 7 briefs, 2026-10-18)
+  moved convergence from 0/7 to 2/7 ≈ 0.29 — still far under the 0.85
+  gate — and raised citation support only to ≈0.61 vs the 0.90
+  requirement, so nothing was promoted. The diagnosis (offline cassette
+  review + live runs) is that the gap is claim-level grounding under
+  real models, not routing: next step is another candidate round on the
+  writer/reviewer pair via the registry's A/B gate.
 - **Live latency sits near (not under) the p50 target**: parallel search +
   bounded-concurrency scraping brought wall-clock from 150–670s down to
   ~105s for a full 3-round debate job. The remaining serial cost is the
