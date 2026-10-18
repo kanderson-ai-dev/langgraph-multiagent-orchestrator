@@ -4,6 +4,12 @@ name: live-eval
 # it costs money and needs secrets, so it is manual or scheduled only.
 on:
   workflow_dispatch:
+    inputs:
+      langsmith:
+        description:
+          "Also publish a LangSmith experiment (requires LANGCHAIN_API_KEY)"
+        type: boolean
+        default: false
   schedule:
     - cron: "0 6 * * 1"  # Mondays 06:00 UTC
 
@@ -17,8 +23,12 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SEARCH_API_KEY: ${{ secrets.SEARCH_API_KEY }}
-      LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
-      LANGCHAIN_TRACING_V2: "true"
+      LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+      LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+      LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+      TRACING_PROVIDER: "langfuse"
+      # Cheap guard rail: cap per-job LLM spend during the live run.
+      DEFAULT_JOB_BUDGET_USD: "0.08"
     steps:
       # actions/checkout@v7.0.1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -34,11 +44,22 @@ jobs:
         run: uv sync --frozen
 
       # Live eval is informational: failures surface as a failing workflow
-      # run plus artifacts — they never block PRs. --langsmith-live publishes
-      # a real-model LangSmith experiment (spends real tokens).
-      - name: Run live evaluation
-        run: uv run python -m evaluation.run_eval --report --langsmith-live
+      # run plus artifacts — they never block PRs. --langfuse-live publishes
+      # a real-model Langfuse experiment (spends real tokens); Langfuse is
+      # the active live backend (docs/eval/why-langfuse.md).
+      - name: Run live evaluation (Langfuse)
+        run: uv run python -m evaluation.run_eval --report --langfuse-live
         continue-on-error: false
+
+      # Opt-in only — LangSmith quota is intermittent; trigger it from
+      # workflow_dispatch when a comparison run is actually needed.
+      - name: Optional LangSmith experiment
+        if: inputs.langsmith == true
+        env:
+          LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
+          LANGCHAIN_TRACING_V2: "true"
+          TRACING_PROVIDER: "langsmith"
+        run: uv run python -m evaluation.run_eval --report --langsmith-live
 
       # actions/upload-artifact@v7.0.2
       - name: Upload scorecard + trend artifacts

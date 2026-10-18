@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-async%20API-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-supervisor--workers-1C3C3C)](https://github.com/langchain-ai/langgraph)
 [![CI](https://github.com/kanderson-ai-dev/langgraph-multiagent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/kanderson-ai-dev/langgraph-multiagent-orchestrator/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-91%25-brightgreen)](https://github.com/kanderson-ai-dev/langgraph-multiagent-orchestrator/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-92%25-brightgreen)](https://github.com/kanderson-ai-dev/langgraph-multiagent-orchestrator/actions/workflows/ci.yml)
 [![Ruff](https://img.shields.io/badge/linting-ruff-red)](https://github.com/astral-sh/ruff)
 [![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy--strict-blue)](https://mypy-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -71,7 +71,7 @@ the standard of a paid engagement, not a portfolio toy.
   (LLM budget vs. debate rounds) and adapts its actions accordingly.
 - 🏢 **Multi-tenant from day one.** `workspace_id` scopes every job, event
   and report — one tenant can never read another's work.
-- 🧪 **CI green with zero secrets.** 323 tests, 91% coverage on `app/`,
+- 🧪 **CI green with zero secrets.** 354 tests, 92% coverage on `app/`,
   `mypy --strict`, a browser E2E smoke test — all runnable offline via a
   deterministic `StubLLM` and fixture-based tools. `docker compose up` works
   with no credentials at all.
@@ -201,7 +201,7 @@ metrics that matter in this domain.
 | Latency | Full job wall-clock, live path | p50 ≤ 90s / p95 ≤ 240s | **~105s to HITL/done observed** (was 150–670s before parallel search+scrape) — converged runs land near the p50 target; see Known limitations |
 | Cost | Per job (all roles, all rounds) | ≤ $0.08 | **$0.010–$0.104 observed** ✅ (upper end = full 3-round debate + fund) |
 | UI end-to-end | Browser E2E: real console → submit → SSE transcript → rendered report → clickable sources | runs in CI (Playwright) | **PASS** ✅ |
-| Test coverage | `pytest --cov=app` | ≥ 80% | **91%** ✅ |
+| Test coverage | `pytest --cov=app` | ≥ 80% | **92%** ✅ |
 | Static typing | `mypy --strict app/` | 0 errors | **0 errors** ✅ |
 
 ```bash
@@ -226,9 +226,9 @@ counterfactual the orchestration has to beat. Latest offline scorecard
 |---|---|---|
 | Citation support rate | **1.000** | 0.500 |
 | Reviewer rubric (1–5) | 4.500 | 4.500 |
-| Blocked-rate on injection case | **1.000** | 0.000 |
-| Avg LLM calls | 3.0 | 1.0 |
-| Avg cost per case (stub-estimated tokens) | $0.000189 | **$0.000108** |
+| Blocked-rate on injection cases | **1.000** | 0.000 |
+| Avg LLM calls | 3.6 | 1.0 |
+| Avg cost per case (stub-estimated tokens) | $0.000219 (+$0.000063 judge) | **$0.000108** |
 | Avg latency (stub) | 0.02s | **~0.00s** |
 
 Read this honestly: the offline stub *models* the classic single-shot failure
@@ -473,7 +473,7 @@ evaluation/            # EDD dataset, evaluators, run_eval, scorecards,
 frontend/              # `/` landing (Tailwind CDN) + `/console` operator UI
                        # (ES modules: views/{jobs,report,review,prompts,
                        #  performance,audit}.js)
-tests/                 # 323 tests — offline by default, incl. browser E2E
+tests/                 # 354 tests — offline by default, incl. browser E2E
 docs/                  # adr/, eval/, observability/ (Grafana), ui-qa/,
                        # functional-qa/, screenshots/
 scripts/               # record_demo.py (GIF), capture_screenshots.py,
@@ -487,7 +487,7 @@ scripts/               # record_demo.py (GIF), capture_screenshots.py,
 ```bash
 ruff check .                                            # lint
 mypy --strict app/                                      # types (0 errors)
-pytest -v --cov=app                                     # 323 tests, offline, 91%
+pytest -v --cov=app                                     # 354 tests, offline, 92%
 uv run --with playwright pytest tests/test_frontend_e2e.py  # browser E2E
 uv run python -m evaluation.run_eval                    # EDD quality gate
 uv run python -m evaluation.latency_bench               # p50/p95 bench (live creds)
