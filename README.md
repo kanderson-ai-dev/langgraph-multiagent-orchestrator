@@ -427,6 +427,8 @@ named volume; `.env` is read at runtime — no secrets are baked in.
 | `LANGFUSE_BASE_URL` | no | — | Langfuse region/self-host (default cloud) |
 | `JWT_SECRET_KEY` / `ADMIN_PASSWORD_HASH` / `ADMIN_USERNAME` | no | ✅ | Enables JWT auth (else open local dev) |
 | `MAX_DEBATE_ROUNDS` | no | — | Writer↔Reviewer cap before escalation |
+| `SUPERVISOR_MAX_DISPATCHES` | no | — | Hard bound on Supervisor routing steps |
+| `PROMPT_EVAL_TIMEOUT_SECONDS` | no | — | Per-eval bound for A/B + promotion runs |
 | `MAX_WORKER_DISPATCHES` | no | — | Per-worker dispatch cap (anti-loop guard) |
 | `MAX_SUB_QUESTIONS` | no | — | Researcher query fan-out bound |
 | `DEFAULT_JOB_BUDGET_USD` | no | — | Global fallback budget cap per job |

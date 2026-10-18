@@ -15,6 +15,9 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.core.metrics import DEBATE_ROUNDS_TOTAL
+
+# Same constant the EDD gate enforces — single source in app.core.thresholds.
+from app.core.thresholds import EDD_THRESHOLDS
 from app.framework.worker import StateUpdate
 from app.graph.citations import citation_supported, support_rate
 from app.graph.state import (
@@ -30,7 +33,7 @@ from app.graph.teams import SECTION_TEMPLATES
 from app.services.llm_client import StructuredLLM
 from app.services.prompt_registry import PromptRegistry
 
-_SUPPORT_THRESHOLD = 0.90  # matches the EDD gate in the project objective
+_SUPPORT_THRESHOLD = EDD_THRESHOLDS["citation_support_rate"]
 
 
 class Rubric(BaseModel):

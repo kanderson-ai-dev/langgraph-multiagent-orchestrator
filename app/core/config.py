@@ -78,6 +78,8 @@ class Settings(BaseSettings):
 
     # Orchestration bounds
     max_debate_rounds: int = Field(default=3, ge=0, le=10)
+    supervisor_max_dispatches: int = Field(default=25, ge=1)
+    prompt_eval_timeout_seconds: float = Field(default=25.0, gt=0)
     # HITL: a job paused in awaiting_review for longer than this is swept
     # to `expired` by the background sweeper. 0 disables expiry.
     hitl_expiry_hours: float = Field(default=72.0, ge=0.0)

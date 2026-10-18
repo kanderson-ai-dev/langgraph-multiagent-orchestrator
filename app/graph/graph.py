@@ -165,7 +165,9 @@ def build_graph(
             if isinstance(llm, StubLLM)
             else make_llm_decider(llm, prompts)
         )
-    supervisor = Supervisor(registry, decider, max_dispatches=25)
+    supervisor = Supervisor(
+        registry, decider, max_dispatches=settings.supervisor_max_dispatches
+    )
 
     async def input_guardrail_node(state: OrchestrationState) -> dict[str, Any]:
         """Screen the brief before any paid call — blocked input burns 0 tokens."""

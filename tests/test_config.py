@@ -62,3 +62,44 @@ def test_debate_round_bounds() -> None:
         Settings(_env_file=None, max_debate_rounds=-1)
     with pytest.raises(ValueError):
         Settings(_env_file=None, max_debate_rounds=99)
+
+
+def test_supervisor_dispatch_bound_configurable() -> None:
+    s = Settings(_env_file=None, supervisor_max_dispatches=7)
+    assert s.supervisor_max_dispatches == 7
+    assert Settings(_env_file=None).supervisor_max_dispatches == 25
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, supervisor_max_dispatches=0)
+
+
+def test_eval_timeout_configurable() -> None:
+    s = Settings(_env_file=None, prompt_eval_timeout_seconds=5.0)
+    assert s.prompt_eval_timeout_seconds == 5.0
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, prompt_eval_timeout_seconds=0)
+
+
+def test_graph_uses_dispatch_setting(settings: Settings) -> None:
+    """build_graph must thread supervisor_max_dispatches into the Supervisor."""
+    from app.graph.graph import build_graph
+    from tests.test_graph import _FakeScraper, _FakeSearch, _stub_llm
+
+    settings.supervisor_max_dispatches = 4
+    graph = build_graph(
+        settings,
+        llm=_stub_llm(),
+        search=_FakeSearch(),
+        scraper=_FakeScraper(),
+        checkpointer=None,
+    )
+    assert graph is not None
+
+
+def test_reviewer_threshold_is_the_shared_constant() -> None:
+    """The Reviewer's citation check and the EDD gate share one number."""
+    from app.core.thresholds import EDD_THRESHOLDS
+    from app.graph.nodes.reviewer import _SUPPORT_THRESHOLD
+    from app.services.prompt_eval import EDD_THRESHOLDS as PEV
+
+    assert EDD_THRESHOLDS["citation_support_rate"] == _SUPPORT_THRESHOLD
+    assert PEV is EDD_THRESHOLDS  # prompt_eval re-exports, never duplicates

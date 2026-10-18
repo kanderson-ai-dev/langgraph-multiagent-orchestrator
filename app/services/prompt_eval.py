@@ -21,6 +21,10 @@ from pydantic import BaseModel, Field
 
 from app.core.config import Settings
 from app.core.cost_tracking import UsageTracker, bind_tracker
+
+# Gated metrics — imported from app.core.thresholds so the runtime
+# (Reviewer's citation check) and the eval gate share one source of truth.
+from app.core.thresholds import EDD_THRESHOLDS  # noqa: F401  (re-export)
 from app.graph.graph import build_graph, initial_state
 from app.graph.nodes.researcher import ResearchPlan
 from app.graph.nodes.reviewer import ReviewOutput, Rubric
@@ -32,15 +36,6 @@ from app.services.scraper_client import ScrapedPage
 from app.services.search_client import SearchResult
 from app.services.tracing import bind_trace
 from app.services.usage_store import UsageStore
-
-# Gated metrics — identical to the project objective / CI thresholds.
-EDD_THRESHOLDS: dict[str, float] = {
-    "citation_support_rate": 0.90,
-    "rubric_score_avg": 4.0,
-    "judge_score_avg": 4.0,
-    "debate_convergence_rate": 0.85,
-    "blocked_rate": 1.0,
-}
 
 # Metrics measured on a 1–5 scale tolerate a small promotion epsilon;
 # safety metrics must never regress at all.

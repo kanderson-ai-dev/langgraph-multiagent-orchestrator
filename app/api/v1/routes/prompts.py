@@ -38,7 +38,6 @@ from app.services.prompt_registry import (
 
 router = APIRouter(prefix="/prompts", tags=["prompts"])
 
-_AB_RUN_TIMEOUT = 25.0  # seconds — routes never block longer on an eval
 
 
 # ─── dependencies ────────────────────────────────────────────────────────────
@@ -280,7 +279,10 @@ async def ab_test(
         return {"run_id": run_id, "status": "running"}
 
     try:
-        ab = await bounded_eval(evaluator(name, version), timeout=_AB_RUN_TIMEOUT)
+        ab = await bounded_eval(
+            evaluator(name, version),
+            timeout=settings.prompt_eval_timeout_seconds,
+        )
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail="eval timed out") from exc
     return ab.model_dump()
@@ -326,7 +328,10 @@ async def promote(
 
     # Metric gate: offline A/B against the promoted version.
     try:
-        ab = await bounded_eval(evaluator(name, version), timeout=_AB_RUN_TIMEOUT)
+        ab = await bounded_eval(
+            evaluator(name, version),
+            timeout=settings.prompt_eval_timeout_seconds,
+        )
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail="eval timed out") from exc
     failures = promotion_gate(ab, epsilon=settings.prompt_promotion_epsilon)
