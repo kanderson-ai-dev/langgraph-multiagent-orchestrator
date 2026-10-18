@@ -18,6 +18,7 @@ import aiosqlite
 from pydantic import BaseModel
 
 from app.graph.state import Brief, JobStatus
+from app.services.sqlite_util import connect
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -72,7 +73,7 @@ class JobStore:
     async def _ensure_schema(self) -> None:
         if not self._initialized:
             Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-            async with aiosqlite.connect(self._db_path) as db:
+            async with connect(self._db_path) as db:
                 await db.executescript(_SCHEMA)
                 await db.commit()
             self._initialized = True
@@ -80,7 +81,7 @@ class JobStore:
     @asynccontextmanager
     async def _conn(self) -> AsyncIterator[aiosqlite.Connection]:
         await self._ensure_schema()
-        async with aiosqlite.connect(self._db_path) as db:
+        async with connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             yield db
 

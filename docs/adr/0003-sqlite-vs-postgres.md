@@ -30,6 +30,15 @@ the explicit next step.**
   with `tmp_path` databases.
 - **+** Embedded DB = backup = `cp` of a file; demo/portfolio friendly.
 - **−** Single-writer limits horizontal scale — mitigated by WAL mode and
-  the documented Postgres migration path (not half-implemented).
+  the documented Postgres migration path (not half-implemented). Every
+  store connection goes through `app/services/sqlite_util.py`, which sets
+  `journal_mode=WAL` (readers never block on an uncommitted writer),
+  `busy_timeout=5000` (writers queue instead of erroring instantly),
+  `synchronous=NORMAL` (safe under WAL; a full OS/power loss can roll
+  back the last commit) and `foreign_keys=ON`. Verified: a test hammers
+  one file with 25 interleaved writers and none raise
+  `OperationalError`. What WAL does **not** fix: still one writer at a
+  time, still single-host — Postgres remains the scale-out step.
+  LangGraph's own `AsyncSqliteSaver` enables WAL on the checkpoints file.
 - **−** No row-level locking across replicas — acceptable until multi-node
   deploys arrive.

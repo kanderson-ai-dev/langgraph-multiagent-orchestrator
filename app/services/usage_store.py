@@ -13,6 +13,8 @@ from pathlib import Path
 import aiosqlite
 from pydantic import BaseModel
 
+from app.services.sqlite_util import connect
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS usage_events (
     event_id          TEXT PRIMARY KEY,
@@ -77,7 +79,7 @@ class UsageStore:
     async def _ensure_schema(self) -> None:
         if not self._initialized:
             Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-            async with aiosqlite.connect(self._db_path) as db:
+            async with connect(self._db_path) as db:
                 await db.executescript(_SCHEMA)
                 await self._migrate(db)
                 await db.commit()
@@ -95,7 +97,7 @@ class UsageStore:
     @asynccontextmanager
     async def _conn(self) -> AsyncIterator[aiosqlite.Connection]:
         await self._ensure_schema()
-        async with aiosqlite.connect(self._db_path) as db:
+        async with connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             yield db
 

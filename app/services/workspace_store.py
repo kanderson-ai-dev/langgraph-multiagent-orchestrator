@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 
 import aiosqlite
 
+from app.services.sqlite_util import open_connection
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS workspaces (
     workspace_id TEXT PRIMARY KEY,
@@ -69,7 +71,7 @@ class WorkspaceStore:
         self._initialized = False
 
     async def _db(self) -> aiosqlite.Connection:
-        db = await aiosqlite.connect(self._db_path)
+        db = await open_connection(self._db_path)
         db.row_factory = sqlite3.Row
         if not self._initialized:
             await db.executescript(_SCHEMA)

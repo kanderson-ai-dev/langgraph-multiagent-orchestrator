@@ -15,6 +15,8 @@ from typing import Protocol
 
 import aiosqlite
 
+from app.services.sqlite_util import open_connection
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS revoked_tokens (
     jti TEXT PRIMARY KEY,
@@ -48,7 +50,7 @@ class SqliteTokenStore:
         self._initialized = False
 
     async def _db(self) -> aiosqlite.Connection:
-        db = await aiosqlite.connect(self._db_path)
+        db = await open_connection(self._db_path)
         db.row_factory = sqlite3.Row
         if not self._initialized:
             await db.executescript(_SCHEMA)

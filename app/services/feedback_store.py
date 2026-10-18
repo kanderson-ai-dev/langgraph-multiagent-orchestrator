@@ -16,6 +16,8 @@ from typing import Any
 
 import aiosqlite
 
+from app.services.sqlite_util import connect
+
 DDL = """
 CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,7 +41,7 @@ class FeedbackStore:
 
     @asynccontextmanager
     async def _conn(self) -> AsyncIterator[aiosqlite.Connection]:
-        async with aiosqlite.connect(self._path) as db:
+        async with connect(self._path) as db:
             db.row_factory = aiosqlite.Row
             if not self._initialized:
                 await db.executescript(DDL)

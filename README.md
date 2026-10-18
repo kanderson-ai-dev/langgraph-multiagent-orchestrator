@@ -546,9 +546,10 @@ protocol with a Postgres implementation (SQLite today is single-node).
   Writer↔Reviewer debate itself — sequential by design — plus keyless
   search latency; a paid provider (Tavily) would shave the research phase
   further.
-- The SQLite `JobStore` is single-node; the next step is a `JobStore`
-  protocol + Postgres implementation for true multi-replica state (the
-  rate limiter and event bus already have Redis backends — see ADR 0003).
+- The SQLite stores run WAL + a 5 s busy timeout (concurrency-tested —
+  see ADR 0003) but remain single-node, single-writer; the next step is
+  a `JobStore` protocol + Postgres implementation for true multi-replica
+  state (the rate limiter and event bus already have Redis backends).
 - LLM-as-judge and live experiments require live credentials; the
   offline scorecard intentionally validates the deterministic pipeline
   (ADR 0004).

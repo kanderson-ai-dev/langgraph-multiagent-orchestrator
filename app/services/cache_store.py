@@ -12,7 +12,7 @@ read-miss so the table self-prunes.
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import aiosqlite
+from app.services.sqlite_util import connect
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS fetch_cache (
@@ -41,7 +41,7 @@ class CacheStore:
     async def _ensure_schema(self) -> None:
         if not self._initialized:
             Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-            async with aiosqlite.connect(self._db_path) as db:
+            async with connect(self._db_path) as db:
                 await db.executescript(_SCHEMA)
                 await db.commit()
             self._initialized = True
@@ -62,7 +62,7 @@ class CacheStore:
         """
         await self._ensure_schema()
         moment = now or datetime.now(UTC)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with connect(self._db_path) as db:
             cursor = await db.execute(
                 "SELECT payload_json, fetched_at FROM fetch_cache"
                 " WHERE kind = ? AND workspace_id = ? AND cache_key = ?"
@@ -95,7 +95,7 @@ class CacheStore:
         """Store a payload under today's key (upsert — retries are safe)."""
         await self._ensure_schema()
         moment = now or datetime.now(UTC)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with connect(self._db_path) as db:
             await db.execute(
                 "INSERT OR REPLACE INTO fetch_cache"
                 " (kind, workspace_id, cache_key, day, payload_json,"
@@ -111,7 +111,7 @@ class CacheStore:
         """Drop rows from previous UTC days — explicit cleanup helper."""
         await self._ensure_schema()
         today = _day(now or datetime.now(UTC))
-        async with aiosqlite.connect(self._db_path) as db:
+        async with connect(self._db_path) as db:
             cursor = await db.execute(
                 "DELETE FROM fetch_cache WHERE day < ?", (today,)
             )
