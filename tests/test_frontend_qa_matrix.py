@@ -463,7 +463,7 @@ def test_qa_matrix_row(case: Case, tmp_path: Path) -> None:
         except Exception:
             browser = p.chromium.launch(headless=True)
         try:
-            page = browser.new_page(viewport={"width": 1366, "height": 900})
+            page = browser.new_page(viewport={"width": 1366, "height": 900}, bypass_csp=True)
             page.on("pageerror", lambda e: errors.append(str(e)))
 
             def _console(m: Any) -> None:

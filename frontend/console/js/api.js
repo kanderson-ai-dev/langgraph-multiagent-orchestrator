@@ -6,11 +6,17 @@
 const API = "/api/v1";
 const TOKEN_KEY = "orx_token";
 
-export const getToken = () => localStorage.getItem(TOKEN_KEY) || "";
+// Tokens default to sessionStorage (tab-scoped, cleared when the tab
+// closes); localStorage is used only when the operator explicitly ticks
+// "Remember me" at sign-in — a persisted token survives restarts but also
+// persists for anyone with local access to the profile.
+export const getToken = () =>
+  sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY) || "";
 
-export function setToken(token) {
-  if (token) localStorage.setItem(TOKEN_KEY, token);
-  else localStorage.removeItem(TOKEN_KEY);
+export function setToken(token, { remember = false } = {}) {
+  sessionStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_KEY);
+  if (token) (remember ? localStorage : sessionStorage).setItem(TOKEN_KEY, token);
 }
 
 export function authHeaders() {

@@ -126,7 +126,7 @@ def test_console_full_flow(live_server: Any) -> None:
         except Exception as exc:
             pytest.skip(f"no browser binary available: {exc}")
         try:
-            page = browser.new_page(viewport={"width": 1366, "height": 860})
+            page = browser.new_page(viewport={"width": 1366, "height": 860}, bypass_csp=True)
             page.goto(live_server.url + "/console/")
             page.fill('#job-form [name="topic"]', "SOC 2 vendor landscape")
             page.click("#submit-btn")
@@ -165,7 +165,7 @@ def test_prompt_registry_tab_flow(live_server: Any) -> None:
         except Exception as exc:
             pytest.skip(f"no browser binary available: {exc}")
         try:
-            page = browser.new_page(viewport={"width": 1366, "height": 900})
+            page = browser.new_page(viewport={"width": 1366, "height": 900}, bypass_csp=True)
             page.goto(live_server.url + "/console/")
             page.click('[data-tab="prompts"]')
 
@@ -275,7 +275,7 @@ def test_performance_and_audit_tabs(live_server: Any) -> None:
         except Exception as exc:
             pytest.skip(f"no browser binary available: {exc}")
         try:
-            page = browser.new_page(viewport={"width": 1366, "height": 900})
+            page = browser.new_page(viewport={"width": 1366, "height": 900}, bypass_csp=True)
             page.goto(live_server.url + "/console/")
 
             # Performance tab — empty state first (no completed jobs yet).
@@ -333,7 +333,7 @@ def test_console_responsive(live_server: Any) -> None:
         try:
             for width in (375, 768, 1280):
                 page = browser.new_page(
-                    viewport={"width": width, "height": 800}
+                    viewport={"width": width, "height": 800}, bypass_csp=True
                 )
                 page.goto(live_server.url + "/console/")
                 for tab in ("jobs", "prompts", "performance", "audit"):

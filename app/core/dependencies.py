@@ -87,6 +87,18 @@ async def get_context(
     payload = verify_token(settings, token)
     if payload is None:
         raise HTTPException(status_code=401, detail="authentication required")
+    if payload.jti:
+        from app.services.token_store import TokenStore
+
+        token_store: TokenStore | None = getattr(
+            request.app.state, "token_store", None
+        )
+        if token_store is not None and await token_store.is_revoked(
+            payload.jti
+        ):
+            raise HTTPException(
+                status_code=401, detail="authentication required"
+            )
     return RequestContext(
         payload.workspace_id,
         payload.sub,

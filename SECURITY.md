@@ -31,6 +31,16 @@ content** gathered by the Researcher agent.
   their own role from `api_keys`. The platform-admin username
   (`ADMIN_USERNAME`) bootstraps `admin` even before any membership row
   exists.
+- **Sessions:** each JWT carries a unique `jti`; `POST /auth/logout`
+  revokes it server-side (recorded until its own `exp`), so sign-out is
+  real instead of waiting for token expiry. The console keeps the token
+  in `sessionStorage` by default — `localStorage` only when the operator
+  ticks "Remember me". API keys aren't sessions: revoke them via
+  `DELETE /workspaces/{id}/api-keys/{key_id}`.
+- **Content-Security-Policy:** per-surface — `/console` is strict
+  self-only, the landing allows the Tailwind CDN and Google Fonts it
+  loads, `/docs` allows jsdelivr, and API/JSON responses get
+  `default-src 'none'`.
 - Every route is scoped by `workspace_id`; a member of workspace A gets
   `404` (not `403`) on workspace B's resources — existence is not leaked.
 - Registry lifecycle, workspace membership, API-key issuance and feedback

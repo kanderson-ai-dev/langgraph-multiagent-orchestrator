@@ -1,5 +1,6 @@
 """Security helpers: JWT issuance/verification and bcrypt password hashing."""
 
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -17,6 +18,8 @@ class TokenPayload(BaseModel):
     exp: datetime
     iat: datetime
     role: str = "member"
+    # Token id — lets the server revoke a still-valid JWT at sign-out.
+    jti: str | None = None
 
 
 def hash_password(password: str) -> str:
@@ -52,6 +55,7 @@ def issue_token(
             "role": role,
             "iat": int(now.timestamp()),
             "exp": int(expires.timestamp()),
+            "jti": uuid.uuid4().hex,
         },
         settings.jwt_secret_key.get_secret_value(),
         algorithm=settings.jwt_algorithm,

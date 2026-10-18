@@ -1,7 +1,8 @@
 /* Auth — only needed when the API has auth enabled (JWT_SECRET_KEY +
  * ADMIN_PASSWORD_HASH configured). Sign in with admin credentials to get
  * a short-lived JWT, or paste an `orx_…` workspace API key directly.
- * The token lives in localStorage so a page reload keeps the session;
+ * The token lives in sessionStorage by default (or localStorage when
+ * "Remember me" is ticked) so a page reload keeps the session;
  * api.js and sse.js attach it as a Bearer header. Auth-disabled local
  * dev never sees this modal — nothing returns 401 there. */
 
@@ -24,11 +25,16 @@ export function initAuth() {
   };
   refresh();
 
-  btn.addEventListener("click", () => {
+  btn.addEventListener("click", async () => {
     if (getToken()) {
+      // Revoke the JWT server-side before dropping it locally.
+      await fetch("/api/v1/auth/logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      }).catch(() => {});
       setToken("");
       toast("Signed out");
-      refresh();
+      location.reload();
       return;
     }
     openAuthModal();
@@ -43,8 +49,9 @@ export function initAuth() {
     const key = $("#auth-apikey").value.trim();
     const user = $("#auth-user").value.trim();
     const pass = $("#auth-pass").value;
+    const remember = $("#auth-remember").checked;
     if (key) {
-      setToken(key);
+      setToken(key, { remember });
       location.reload();
       return;
     }
@@ -65,7 +72,7 @@ export function initAuth() {
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.detail || `HTTP ${res.status}`);
-      setToken(body.access_token);
+      setToken(body.access_token, { remember });
       location.reload();
     } catch (ex) {
       err.textContent = `Sign-in failed: ${ex.message}`;

@@ -48,6 +48,43 @@ _SECURITY_HEADERS = {
     "X-XSS-Protection": "0",
 }
 
+# Content-Security-Policy, per surface. The console is fully self-hosted so
+# it gets the strictest policy; the landing allows the Tailwind CDN and
+# Google Fonts it actually loads; FastAPI's Swagger/ReDoc need jsdelivr;
+# everything else is JSON and may not be rendered at all.
+_CSP_CONSOLE = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
+    " img-src 'self' data:; font-src 'self'; connect-src 'self';"
+    " frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+)
+_CSP_LANDING = (
+    "default-src 'self';"
+    " script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com;"
+    " style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;"
+    " font-src 'self' https://fonts.gstatic.com;"
+    " img-src 'self' data:; connect-src 'self';"
+    " frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+)
+_CSP_DOCS = (
+    "default-src 'self';"
+    " script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
+    " style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
+    " img-src 'self' data: https://fastapi.tiangolo.com;"
+    " worker-src 'self' blob:; connect-src 'self';"
+    " frame-ancestors 'none'; base-uri 'self'"
+)
+_CSP_API = "default-src 'none'; frame-ancestors 'none'"
+
+
+def _csp_for(path: str) -> str:
+    if path.startswith("/console"):
+        return _CSP_CONSOLE
+    if path == "/" or path == "/index.html":
+        return _CSP_LANDING
+    if path == "/openapi.json" or path.startswith(("/docs", "/redoc")):
+        return _CSP_DOCS
+    return _CSP_API
+
 
 def build_runner(
     settings: Settings, checkpointer: BaseCheckpointSaver[Any] | None = None
@@ -125,6 +162,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.workspace_store = WorkspaceStore(settings.database_path)
         if not hasattr(app.state, "feedback_store"):
             app.state.feedback_store = FeedbackStore(settings.database_path)
+        if not hasattr(app.state, "token_store"):
+            from app.services.token_store import SqliteTokenStore
+
+            app.state.token_store = SqliteTokenStore(settings.database_path)
         app.state.started_at = time.monotonic()
         # Idempotent bootstrap: pre-RBAC implicit tenants land in the
         # ``default`` workspace with the platform admin as its admin member.
@@ -190,6 +231,9 @@ def create_app() -> FastAPI:
         response.headers["X-Request-ID"] = request_id
         for header, value in _SECURITY_HEADERS.items():
             response.headers.setdefault(header, value)
+        response.headers.setdefault(
+            "Content-Security-Policy", _csp_for(request.url.path)
+        )
         return response
 
     app.include_router(status_router)
