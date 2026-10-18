@@ -107,7 +107,13 @@ def pick_hitl_action(page) -> None:
 def main() -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch(channel="chrome", headless=True)
-        page = browser.new_page(viewport={"width": 1366, "height": 860})
+        # The console ships a strict self-only CSP — bypass it so Playwright's
+        # injected eval (wait_for_function/evaluate) keeps working, exactly
+        # like the browser test contexts do.
+        context = browser.new_context(
+            viewport={"width": 1366, "height": 860}, bypass_csp=True
+        )
+        page = context.new_page()
 
         # ── Landing: read the page, then fill the brief slowly ────────
         page.goto(BASE + "/", wait_until="networkidle")

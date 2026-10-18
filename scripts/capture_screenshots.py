@@ -56,7 +56,11 @@ white-space:pre-wrap;margin:0">{escaped}</pre></body></html>"""
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
-        page = _browser(p).new_page(viewport={"width": 1440, "height": 900})
+        # bypass_csp: the console's strict self-only CSP blocks Playwright's
+        # injected eval (wait_for_function/eval_on_selector) on real pages.
+        page = _browser(p).new_context(
+            viewport={"width": 1440, "height": 900}, bypass_csp=True
+        ).new_page()
 
         # 1. Sealed report card — open the newest completed job
         page.goto(f"{BASE}/console/", wait_until="networkidle")
