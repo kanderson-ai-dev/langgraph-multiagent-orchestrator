@@ -57,26 +57,26 @@ class ReviewOutput(BaseModel):
 
 def verify_citations(
     draft: ReportDraft, evidence: list[EvidenceItem]
-) -> tuple[list[Citation], int, list[str | None]]:
+) -> tuple[list[Citation], int, list[str]]:
     """Split citations into (supported, dropped-count, source-hash) tuples.
 
     ``kept`` and ``source_hashes`` are aligned: each supported citation
-    records the ``sha256`` of the evidence item that verified it (None
-    when the fallback pooled-text path matched or the item predates
-    sealing).
+    records the ``sha256`` of the evidence item that verified it (empty
+    string for pre-seal legacy items).
+
+    A citation verifies only against the source it *cites* — never against
+    pooled evidence text. A quote that exists in source B but is credited
+    to source A (or to a phantom URL) is contamination, not support.
     """
     by_url = {e.url: e for e in evidence}
     kept: list[Citation] = []
-    source_hashes: list[str | None] = []
+    source_hashes: list[str] = []
     dropped = 0
     for c in draft.citations:
         item = by_url.get(c.source_url)
-        text = item.text if item else ""
-        if not text:  # URL unknown — check across all evidence as fallback
-            text = "\n".join(e.text for e in evidence)
-        if citation_supported(c.quote, text):
+        if item is not None and citation_supported(c.quote, item.text):
             kept.append(c)
-            source_hashes.append(item.sha256 if item else None)
+            source_hashes.append(item.sha256)
         else:
             dropped += 1
     return kept, dropped, source_hashes

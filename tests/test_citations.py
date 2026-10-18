@@ -39,3 +39,48 @@ def test_support_rate() -> None:
     assert support_rate(9, 10) == 0.9
     assert support_rate(0, 0) == 0.0
     assert support_rate(3, 0) == 0.0
+
+
+# ─── source-binding: a quote must verify against the CITED source ────────────
+
+
+def test_citation_must_match_cited_source_only() -> None:
+    """A quote present in a *different* source does not support the claim —
+    no pooling across the evidence bundle."""
+    from app.graph.nodes.reviewer import verify_citations
+    from app.graph.state import Citation, EvidenceItem, ReportDraft
+
+    ev = [
+        EvidenceItem(
+            evidence_id="e1", url="https://a.test",
+            text="alpha quote text", sha256="a" * 64,
+        ),
+        EvidenceItem(
+            evidence_id="e2", url="https://b.test",
+            text="beta quote text", sha256="b" * 64,
+        ),
+    ]
+    draft = ReportDraft(
+        version=1, title="t", markdown="m",
+        citations=[
+            # quote lives in b.test but the citation credits a phantom URL
+            Citation(
+                claim="x", quote="beta quote text",
+                source_url="https://nowhere.test",
+            ),
+            # quote lives in a.test but the citation credits b.test
+            Citation(
+                claim="y", quote="alpha quote text",
+                source_url="https://b.test",
+            ),
+            # correct attribution — the only one that survives
+            Citation(
+                claim="z", quote="alpha quote text",
+                source_url="https://a.test",
+            ),
+        ],
+    )
+    kept, dropped, hashes = verify_citations(draft, ev)
+    assert dropped == 2
+    assert kept == [draft.citations[2]]
+    assert hashes == ["a" * 64]
