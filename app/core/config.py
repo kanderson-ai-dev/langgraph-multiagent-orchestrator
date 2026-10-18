@@ -114,6 +114,8 @@ class Settings(BaseSettings):
 
     # Rate limiting
     rate_limit_per_minute: int = Field(default=60, ge=0)
+    sse_heartbeat_seconds: float = Field(default=15.0, gt=0)
+    sse_max_stream_seconds: float = Field(default=1800.0, gt=0)
 
     # Optional Redis for horizontal-scale backends (rate limiter, SSE
     # event bus). None = single-process in-memory implementations.

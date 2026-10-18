@@ -8,7 +8,7 @@ usage tracking, and job-store status transitions. Resume after HITL uses
 import asyncio
 import contextlib
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -73,7 +73,7 @@ class JobRunner:
     async def events(self, job_id: str) -> list[dict[str, Any]]:
         return await self._bus.history(job_id)
 
-    async def stream(self, job_id: str) -> AsyncIterator[dict[str, Any]]:
+    async def stream(self, job_id: str) -> AsyncGenerator[dict[str, Any], None]:
         """Yield buffered then live events until the job reaches a terminal state."""
         async for e in self._bus.subscribe(job_id):
             yield e

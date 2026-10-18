@@ -142,14 +142,68 @@ async def stream(
     job_id: str,
     request: Request,
     ctx: RequestContext = Depends(require_role("viewer")),
+    settings: Settings = Depends(get_settings),
 ) -> StreamingResponse:
     job = await _jobs(request).get(ctx.workspace_id, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
 
     async def events() -> AsyncIterator[str]:
-        async for e in _runner(request).stream(job_id):
-            yield f"data: {json.dumps(e)}\n\n"
+        """SSE stream: heartbeat comments keep proxies alive, client
+        disconnect frees the bus subscriber, and a hard lifetime cap ends
+        stale streams with a ``timeout`` frame the console re-attaches on."""
+        import asyncio
+        import contextlib
+        import time
+
+        source = _runner(request).stream(job_id)
+        it = source.__aiter__()
+        deadline = time.monotonic() + settings.sse_max_stream_seconds
+        # The pending ``anext`` must never be cancelled — cancelling it
+        # would close the upstream generator (and the bus subscription).
+        # asyncio.wait + keeping the task across ticks leaves it running.
+        pending: asyncio.Task[dict[str, Any]] | None = None
+        try:
+            while True:
+                # is_disconnected() awaits a message on the receive
+                # channel — it can block under some ASGI transports, so
+                # it gets a tiny bounded wait; the unconditional safety
+                # net is the server cancelling this task on disconnect.
+                try:
+                    disconnected = await asyncio.wait_for(
+                        request.is_disconnected(), timeout=0.05
+                    )
+                except TimeoutError:
+                    disconnected = False
+                if disconnected:
+                    break
+                if time.monotonic() >= deadline:
+                    yield f"data: {json.dumps({'type': 'timeout'})}\n\n"
+                    break
+                if pending is None:
+                    pending = asyncio.ensure_future(anext(it))
+                done, _ = await asyncio.wait(
+                    {pending}, timeout=settings.sse_heartbeat_seconds
+                )
+                if not done:
+                    yield ": ping\n\n"
+                    continue
+                try:
+                    e = pending.result()
+                except StopAsyncIteration:
+                    break
+                pending = None
+                yield f"data: {json.dumps(e)}\n\n"
+        finally:
+            if pending is not None and not pending.done():
+                # Cancel, then await — aclose() raises "generator already
+                # running" while a cancelled anext is still in flight.
+                pending.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await pending
+            # Closing the generator runs the bus's own finally → the
+            # subscriber queue is removed even on abrupt disconnects.
+            await source.aclose()
 
     return StreamingResponse(events(), media_type="text/event-stream")
 
