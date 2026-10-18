@@ -18,7 +18,7 @@ services:
       timeout: 3s
       retries: 5
 
-  app:
+  orchestrator:
     environment:
       - REDIS_URL=redis://redis:6379/0
     depends_on:

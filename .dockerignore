@@ -12,7 +12,6 @@ coverage.xml
 htmlcov/
 tests/
 docs/
-evaluation/results/
 .env
 .env.*
 !*.env.example

@@ -20,15 +20,18 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
-from app.core.config import Settings
-from app.graph.state import Brief
-from app.services.llm_client import build_judge_llm, build_llm
-from app.services.prompt_eval import run_eval_case
-from app.services.prompt_registry import PromptRegistry
-from app.services.scraper_client import ScraperClient
-from app.services.search_client import build_search_client
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.core.config import Settings  # noqa: E402
+from app.graph.state import Brief  # noqa: E402
+from app.services.llm_client import build_judge_llm, build_llm  # noqa: E402
+from app.services.prompt_eval import run_eval_case  # noqa: E402
+from app.services.prompt_registry import PromptRegistry  # noqa: E402
+from app.services.scraper_client import ScraperClient  # noqa: E402
+from app.services.search_client import build_search_client  # noqa: E402
 
 TOTAL_CAP_USD = 0.50
 CASE_BUDGET_USD = 0.08  # matches the EDD per-job cost gate

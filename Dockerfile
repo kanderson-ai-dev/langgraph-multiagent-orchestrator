@@ -12,8 +12,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Install runtime deps first so the layer is cached independent of app code.
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# requirements.txt is an all-groups export (includes dev tools), so the image
+# resolves runtime-only deps straight from the lockfile instead.
+COPY pyproject.toml uv.lock ./
+RUN pip install uv \
+    && uv export --frozen --format requirements-txt --no-dev --no-hashes \
+       -o /tmp/requirements.txt \
+    && pip install -r /tmp/requirements.txt \
+    && pip uninstall -y uv
 
 COPY app/ app/
 COPY frontend/ frontend/
