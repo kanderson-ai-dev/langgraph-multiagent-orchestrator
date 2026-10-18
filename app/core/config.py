@@ -117,6 +117,12 @@ class Settings(BaseSettings):
     # Unset → roots are hash-only and the API reports "signed": false.
     audit_signing_key: SecretStr | None = None
 
+    # Optional second-layer input screening: a strict yes/no model call for
+    # briefs that pass the regex layer. Probabilistic, costs one call per
+    # accepted brief — off by default and never run on the StubLLM so the
+    # offline eval stays deterministic and free.
+    guardrail_llm_screen: bool = False
+
     # Rate limiting
     rate_limit_per_minute: int = Field(default=60, ge=0)
     sse_heartbeat_seconds: float = Field(default=15.0, gt=0)

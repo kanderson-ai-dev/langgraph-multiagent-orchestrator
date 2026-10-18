@@ -68,9 +68,16 @@ real scraped HTML and LLM payloads. Before a cassette is committed:
 
 ## OWASP LLM Top 10 mapping
 
-- **LLM01 Prompt Injection** — input guardrail on the brief; sanitization of
-  all fetched content; the Supervisor/worker prompts explicitly treat
-  evidence as data. Dedicated adversarial fixture:
+- **LLM01 Prompt Injection** — input guardrail on the brief (NFKC +
+  invisible-char normalization before matching, EN/ES/FR/DE/PT patterns);
+  sanitization of all fetched content; the Supervisor/worker prompts
+  explicitly treat evidence as data. An **optional** model-based second
+  layer (`GUARDRAIL_LLM_SCREEN`, off by default) adds a probabilistic
+  yes/no classifier for briefs that pass the regexes — it never runs on
+  the offline stub and fails open on provider errors. What this does
+  **not** catch: novel paraphrases the regexes don't describe and
+  payload-splitting across fields — the regex layer is deliberately
+  deterministic, not exhaustive. Dedicated adversarial fixture:
   `tests/fixtures/adversarial_page.html`.
 - **LLM02 Insecure Output Handling** — `screen_output` gates the report;
   security headers middleware; report content is rendered as text, never

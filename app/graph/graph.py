@@ -171,7 +171,7 @@ def build_graph(
 
     async def input_guardrail_node(state: OrchestrationState) -> dict[str, Any]:
         """Screen the brief before any paid call — blocked input burns 0 tokens."""
-        from app.graph.guardrails import screen_brief
+        from app.graph.guardrails import brief_fields, llm_screen_brief, screen_brief
 
         brief = state["brief"]
         result = screen_brief(brief)
@@ -182,6 +182,22 @@ def build_graph(
                     AgentMessage(
                         sender="input_guardrail", recipient="user",
                         kind="system", content=f"Request blocked: {result.reason}",
+                    )
+                ],
+            }
+        # Optional probabilistic second layer — only after the deterministic
+        # regex pass, only on a real LLM (never the stub), tracked as a
+        # "guardrail"-role call. One paid call per *accepted* brief.
+        if settings.guardrail_llm_screen and await llm_screen_brief(
+            llm, brief_fields(brief)
+        ):
+            return {
+                "status": "blocked",
+                "transcript": [
+                    AgentMessage(
+                        sender="input_guardrail", recipient="user",
+                        kind="system",
+                        content="Request blocked: flagged by screening layer",
                     )
                 ],
             }
