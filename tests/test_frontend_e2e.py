@@ -26,6 +26,7 @@ from app.main import create_app
 from app.services.job_runner import JobRunner
 from app.services.job_store import JobStore
 from app.services.usage_store import UsageStore
+from tests.qa_output import qa_output_dir
 from tests.test_graph import _FakeScraper, _FakeSearch, _stub_llm
 
 pytestmark = pytest.mark.requires_browser
@@ -322,10 +323,7 @@ def test_console_responsive(live_server: Any) -> None:
     """375/768/1280 px: no horizontal overflow, all four tabs reachable."""
     if sync_playwright is None:
         pytest.skip("playwright not installed")
-    shots = (
-        __import__("pathlib").Path(__file__).resolve().parent.parent
-        / "docs" / "ui-qa" / "breakpoints"
-    )
+    shots = qa_output_dir() / "docs" / "ui-qa" / "breakpoints"
     shots.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
         try:

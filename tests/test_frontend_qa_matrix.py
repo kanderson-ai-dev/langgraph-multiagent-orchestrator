@@ -14,6 +14,11 @@ state survives a reload, and a screenshot lands in
 ``docs/ui-qa/runs/<n>-<slug>.png``. A session teardown writes the
 recorded outcomes + aggregate gate to ``docs/functional-qa/RUNS.md``.
 
+Those two paths live under the QA output root: a per-session temp dir by
+default so a plain ``pytest`` run leaves ``git status`` clean; run
+``uv run python scripts/refresh_qa_artifacts.py`` to regenerate the
+committed artifacts.
+
 Skipped automatically when Playwright or a browser binary is unavailable.
 """
 
@@ -48,6 +53,7 @@ from app.services.llm_client import StubLLM
 from app.services.scraper_client import ScrapedPage
 from app.services.search_client import SearchResult
 from app.services.usage_store import UsageStore
+from tests.qa_output import qa_output_dir
 from tests.test_graph import _FakeScraper, _FakeSearch
 
 pytestmark = pytest.mark.requires_browser
@@ -57,9 +63,8 @@ try:
 except ImportError:  # pragma: no cover - environment-dependent
     sync_playwright = None  # type: ignore[assignment]
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SHOTS_DIR = REPO_ROOT / "docs" / "ui-qa" / "runs"
-RUNS_MD = REPO_ROOT / "docs" / "functional-qa" / "RUNS.md"
+SHOTS_DIR = qa_output_dir() / "docs" / "ui-qa" / "runs"
+RUNS_MD = qa_output_dir() / "docs" / "functional-qa" / "RUNS.md"
 
 # UI-QA Part-2 text scan — raw developer artifacts must never surface.
 _BAD_TEXT = re.compile(

@@ -110,3 +110,18 @@ def test_evidence_chips_deduplicated() -> None:
     js = _client().get("/console/js/views/report.js").text
     assert "evidence_id" in js
     assert "seen.add" in js
+
+
+def test_qa_artifacts_default_outside_repo(tmp_path) -> None:
+    """A plain ``pytest`` run must not rewrite tracked files under ``docs/``:
+    the QA output root is a temp dir unless ``QA_OUTPUT_DIR`` is set
+    (the refresh script is the only path that repoints it at the repo)."""
+    import os
+
+    import pytest
+
+    from tests.qa_output import REPO_ROOT, qa_output_dir
+
+    if os.environ.get("QA_OUTPUT_DIR"):
+        pytest.skip("explicit artifact-refresh run")
+    assert not qa_output_dir().is_relative_to(REPO_ROOT)
