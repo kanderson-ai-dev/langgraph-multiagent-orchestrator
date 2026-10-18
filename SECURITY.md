@@ -41,6 +41,12 @@ content** gathered by the Researcher agent.
   self-only, the landing allows the Tailwind CDN and Google Fonts it
   loads, `/docs` allows jsdelivr, and API/JSON responses get
   `default-src 'none'`.
+- **Member credentials:** workspace members can carry their own bcrypt
+  `password_hash` (set/rotated by a workspace admin via
+  `PUT /workspaces/{id}/members/{subject}/password`), so JWT sessions are
+  not limited to the shared platform-admin account. Login is rate-limited
+  by client IP *and* by username; unknown user, unset password and wrong
+  password all burn one bcrypt compare and return the same generic 401.
 - Every route is scoped by `workspace_id`; a member of workspace A gets
   `404` (not `403`) on workspace B's resources — existence is not leaked.
 - Registry lifecycle, workspace membership, API-key issuance and feedback

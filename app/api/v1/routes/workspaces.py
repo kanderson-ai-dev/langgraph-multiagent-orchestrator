@@ -73,6 +73,10 @@ class MemberAdd(BaseModel):
     role: str
 
 
+class MemberPassword(BaseModel):
+    password: str = Field(min_length=8, max_length=256)
+
+
 class ApiKeyCreate(BaseModel):
     role: str = "member"
     label: str = Field(default="", max_length=128)
@@ -136,6 +140,29 @@ async def add_member(
     await store.add_member(workspace_id, body.subject, body.role)
     return {"workspace_id": workspace_id, "subject": body.subject,
             "role": body.role}
+
+
+@router.put("/{workspace_id}/members/{subject}/password",
+            response_model=dict[str, str])
+async def set_member_password(
+    workspace_id: str,
+    subject: str,
+    body: MemberPassword,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    ctx: RequestContext = Depends(require_role("admin")),
+) -> dict[str, str]:
+    """Set or rotate a member's login password (bcrypt-hashed at rest)."""
+    from app.core.security import hash_password
+
+    store = _store(request)
+    await _require_ws_admin(store, ctx, workspace_id, settings.admin_username)
+    updated = await store.set_member_password(
+        workspace_id, subject, hash_password(body.password)
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="member not found")
+    return {"workspace_id": workspace_id, "subject": subject, "password_set": "true"}
 
 
 @router.post("/{workspace_id}/api-keys", status_code=201,

@@ -39,6 +39,12 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 """
 
+# Columns added after the initial release — ALTER TABLE migrations guarded
+# by PRAGMA table_info (same convention as usage_store).
+_MIGRATIONS = (
+    "ALTER TABLE members ADD COLUMN password_hash TEXT",
+)
+
 ROLES = ("viewer", "member", "admin")
 KEY_PREFIX = "orx_"
 
@@ -67,6 +73,12 @@ class WorkspaceStore:
         db.row_factory = sqlite3.Row
         if not self._initialized:
             await db.executescript(_SCHEMA)
+            cursor = await db.execute("PRAGMA table_info(members)")
+            existing = {row[1] for row in await cursor.fetchall()}
+            for stmt in _MIGRATIONS:
+                column = stmt.rsplit(" ", 2)[-2]
+                if column not in existing:
+                    await db.execute(stmt)
             await db.commit()
             self._initialized = True
         return db
@@ -173,11 +185,45 @@ class WorkspaceStore:
         db = await self._db()
         try:
             await db.execute(
-                "INSERT OR REPLACE INTO members (workspace_id, subject, role,"
-                " created_at) VALUES (?, ?, ?, ?)",
+                "INSERT INTO members (workspace_id, subject, role,"
+                " created_at) VALUES (?, ?, ?, ?)"
+                " ON CONFLICT(workspace_id, subject)"
+                " DO UPDATE SET role = excluded.role",
                 (workspace_id, subject, role, _now()),
             )
             await db.commit()
+        finally:
+            await db.close()
+
+    async def set_member_password(
+        self, workspace_id: str, subject: str, password_hash: str
+    ) -> bool:
+        """Attach/rotate a member's login password. False if no member row."""
+        db = await self._db()
+        try:
+            cur = await db.execute(
+                "UPDATE members SET password_hash = ?"
+                " WHERE workspace_id = ? AND subject = ?",
+                (password_hash, workspace_id, subject),
+            )
+            await db.commit()
+            return cur.rowcount > 0
+        finally:
+            await db.close()
+
+    async def get_member_password_hash(
+        self, workspace_id: str, subject: str
+    ) -> str | None:
+        """The member's password hash for login, or None when unset/absent."""
+        db = await self._db()
+        try:
+            cur = await db.execute(
+                "SELECT password_hash FROM members"
+                " WHERE workspace_id = ? AND subject = ?",
+                (workspace_id, subject),
+            )
+            row = await cur.fetchone()
+            return str(row["password_hash"]) if row and row["password_hash"] else None
         finally:
             await db.close()
 
