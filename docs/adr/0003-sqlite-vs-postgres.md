@@ -42,3 +42,15 @@ the explicit next step.**
   LangGraph's own `AsyncSqliteSaver` enables WAL on the checkpoints file.
 - **−** No row-level locking across replicas — acceptable until multi-node
   deploys arrive.
+- **Multi-replica honesty (2026-10):** with `REDIS_URL` set, replicas can
+  safely share a rate limiter and event bus; sharing the SQLite *file* is
+  single-host only and is supported for the prompt registry (reads re-merge
+  the DB overlay whenever `prompt_events` grows — a promote in process A is
+  visible in B without restart) and for A/B run records (persisted in
+  `prompt_ab_runs`, so `GET /ab-runs/{id}` answers after a restart).
+  Process-local state that must **not** be relied on across replicas:
+  `JobRunner` task handles/last-values/trace-ids (freed on terminal job
+  states; a resumed job must run on the same process that submitted it),
+  the `ab_runs` hot cache (100 entries / 1 h — the DB row is the truth),
+  and in-memory rate limiting (use `REDIS_URL`). Job rows themselves stay
+  single-writer — Postgres remains the real multi-node step.

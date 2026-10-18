@@ -532,8 +532,13 @@ docker compose -f docker-compose.yml -f docker-compose.override.yml up
 ```
 
 Both backends pass the same parametrized contract test suite — CI uses
-`fakeredis`, never a real Redis. Remaining scale-out step: a `JobStore`
-protocol with a Postgres implementation (SQLite today is single-node).
+`fakeredis`, never a real Redis. Other shared state: the prompt registry
+re-reads its SQLite overlay whenever the lifecycle chain grows (a promote
+in one process is visible in another sharing the file — single host only),
+A/B run records persist in `prompt_ab_runs` so they survive restarts, and
+the runner frees per-job dicts at terminal states. Remaining scale-out
+step: a `JobStore` protocol with a Postgres implementation (SQLite today
+is single-node).
 
 ## Known limitations & next steps
 

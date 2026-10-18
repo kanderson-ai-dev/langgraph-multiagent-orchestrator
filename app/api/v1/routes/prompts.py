@@ -142,17 +142,50 @@ async def registry_audit(
     return {"valid": valid, "root": root, "entries": entries}
 
 
+_AB_RUN_CACHE_MAX = 100
+_AB_RUN_TTL_SECONDS = 3600.0
+
+
+def _ab_cache(request: Request) -> dict[str, dict[str, Any]]:
+    runs = getattr(request.app.state, "ab_runs", None)
+    if runs is None:
+        runs = {}
+        request.app.state.ab_runs = runs
+    return runs
+
+
+def _ab_cache_put(
+    runs: dict[str, dict[str, Any]], run_id: str, entry: dict[str, Any]
+) -> None:
+    """Insert into the hot cache — TTL-evicts stale runs, then caps size."""
+    import time
+
+    now = time.monotonic()
+    for rid, e in list(runs.items()):
+        if now - float(e.get("_ts") or 0.0) > _AB_RUN_TTL_SECONDS:
+            runs.pop(rid, None)
+    while len(runs) >= _AB_RUN_CACHE_MAX:
+        oldest = min(runs, key=lambda r: float(runs[r].get("_ts") or 0.0))
+        runs.pop(oldest, None)
+    entry["_ts"] = now
+    runs[run_id] = entry
+
+
 @router.get("/ab-runs/{run_id}", response_model=dict[str, Any])
 async def ab_run_status(
     run_id: str,
     request: Request,
+    registry: PromptRegistry = Depends(get_prompt_registry),
     ctx: RequestContext = Depends(require_role("viewer")),
 ) -> dict[str, Any]:
-    runs: dict[str, dict[str, Any]] = getattr(request.app.state, "ab_runs", {})
-    run = runs.get(run_id)
+    # Hot cache first; the SQLite copy answers after restart or on a
+    # replica sharing the DB file (scoped per workspace either way).
+    run = _ab_cache(request).get(run_id)
+    if run is None:
+        run = registry.get_ab_run(run_id, ctx.workspace_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
-    return run
+    return {k: v for k, v in run.items() if k != "_ts"}
 
 
 @router.get("/{name}", response_model=list[dict[str, Any]])
@@ -259,21 +292,36 @@ async def ab_test(
         )
     if body.live:
         # Live eval can take minutes — run it job-style, never inline.
-        runs = getattr(request.app.state, "ab_runs", None)
-        if runs is None:
-            runs = {}
-            request.app.state.ab_runs = runs
+        # The record is persisted so a restart/second process can still
+        # answer GET /ab-runs/{id}; the app.state dict is a hot cache.
+        runs = _ab_cache(request)
         run_id = uuid.uuid4().hex[:16]
-        runs[run_id] = {"status": "running", "name": name, "version": version}
+        from datetime import UTC, datetime
+
+        entry: dict[str, Any] = {
+            "run_id": run_id, "status": "running", "name": name,
+            "version": version, "created_at": datetime.now(UTC).isoformat(),
+        }
+        _ab_cache_put(runs, run_id, entry)
+        registry.save_ab_run(
+            run_id, name=name, version=version,
+            workspace_id=ctx.workspace_id, result=entry,
+        )
+
+        def _store(result: dict[str, Any]) -> None:
+            entry.update(result)
+            _ab_cache_put(runs, run_id, entry)
+            registry.save_ab_run(
+                run_id, name=name, version=version,
+                workspace_id=ctx.workspace_id, result=entry,
+            )
 
         async def _run() -> None:
             try:
                 ab = await evaluator(name, version)
-                runs[run_id] = {
-                    "status": "done", **ab.model_dump(),
-                }
+                _store({"status": "done", **ab.model_dump()})
             except Exception as exc:
-                runs[run_id] = {"status": "failed", "error": str(exc)}
+                _store({"status": "failed", "error": str(exc)})
 
         asyncio.get_running_loop().create_task(_run())
         return {"run_id": run_id, "status": "running"}

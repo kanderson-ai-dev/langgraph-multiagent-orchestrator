@@ -108,6 +108,15 @@ CREATE TABLE IF NOT EXISTS prompt_events (
     hash         TEXT NOT NULL,
     created_at   TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS prompt_ab_runs (
+    run_id       TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    version      INTEGER NOT NULL,
+    workspace_id TEXT NOT NULL DEFAULT '',
+    status       TEXT NOT NULL,
+    result_json  TEXT NOT NULL DEFAULT '{}',
+    created_at   TEXT NOT NULL
+);
 """
 
 
@@ -137,11 +146,17 @@ class PromptRegistry:
         conn: sqlite3.Connection | None,
         *,
         promoted_overrides: dict[str, int] | None = None,
+        yaml_versions: dict[tuple[str, int], PromptVersion] | None = None,
     ) -> None:
         self._versions = versions
         self._conn = conn
         self._lock = threading.Lock()
         self._promoted_overrides = dict(promoted_overrides or {})
+        # Pristine YAML seeds kept for cross-process refreshes: a second
+        # process may promote/create versions, so reads re-merge the DB
+        # overlay whenever ``prompt_events`` grew since the last check.
+        self._yaml_versions = yaml_versions if yaml_versions is not None else versions
+        self._revision = self._db_revision()
 
     # ── loading ──────────────────────────────────────────────────────────
 
@@ -162,13 +177,14 @@ class PromptRegistry:
         versions = cls._load_yaml(prompts_dir)
 
         conn: sqlite3.Connection | None = None
+        yaml_versions = versions
         if db_path is not None:
             conn = cls._open_db(db_path)
             cls._sync_yaml(conn, versions)
             versions = cls._merge_db(conn, versions)
 
         cls._validate(versions)
-        return cls(versions, conn)
+        return cls(versions, conn, yaml_versions=yaml_versions)
 
     @staticmethod
     def _load_yaml(prompts_dir: Path) -> dict[tuple[str, int], PromptVersion]:
@@ -307,16 +323,46 @@ class PromptRegistry:
                     f" found {len(promoted)}"
                 )
 
+    # ── cross-process freshness ──────────────────────────────────────────
+
+    def _db_revision(self) -> int:
+        """Monotonic registry revision — MAX(seq) of the lifecycle chain."""
+        if self._conn is None:
+            return -1
+        row = self._conn.execute(
+            "SELECT MAX(seq) AS s FROM prompt_events"
+        ).fetchone()
+        return int(row["s"] or 0)
+
+    def _maybe_refresh(self) -> None:
+        """Re-merge the DB overlay when another process appended events.
+
+        Reads the revision first, then merges — if a write lands between
+        the two the stored revision stays stale and the next read merges
+        again (self-healing, never serves older data than the check).
+        """
+        if self._conn is None:
+            return
+        rev = self._db_revision()
+        if rev == self._revision:
+            return
+        with self._lock:
+            self._versions = self._merge_db(self._conn, dict(self._yaml_versions))
+            self._revision = rev
+
     # ── read API ─────────────────────────────────────────────────────────
 
     def names(self) -> list[str]:
+        self._maybe_refresh()
         return sorted({n for n, _v in self._versions})
 
     def list_versions(self, name: str | None = None) -> list[PromptVersion]:
+        self._maybe_refresh()
         pvs = [p for (n, _v), p in self._versions.items() if name is None or n == name]
         return sorted(pvs, key=lambda p: (p.name, p.version))
 
     def get(self, name: str, version: int | None = None) -> PromptVersion:
+        self._maybe_refresh()
         if version is None:
             version = self._promoted_overrides.get(name)
         if version is None:
@@ -438,6 +484,8 @@ class PromptRegistry:
             ),
         )
         conn.commit()
+        # Own writes bump the revision so the next read doesn't re-merge.
+        self._revision = self._db_revision()
         return digest
 
     def create_candidate(
@@ -554,6 +602,59 @@ class PromptRegistry:
             prev = row["hash"]
         root = prev if events else GENESIS
         return valid, root, entries
+
+    # ── A/B run records ─────────────────────────────────────────────────
+
+    def save_ab_run(
+        self,
+        run_id: str,
+        *,
+        name: str,
+        version: int,
+        workspace_id: str,
+        result: dict[str, Any],
+    ) -> bool:
+        """Upsert an A/B run record; no-ops (returns False) without a DB."""
+        conn = self._conn
+        if conn is None:
+            return False
+        conn.execute(
+            "INSERT INTO prompt_ab_runs"
+            " (run_id, name, version, workspace_id, status, result_json,"
+            "  created_at) VALUES (?,?,?,?,?,?,?)"
+            " ON CONFLICT(run_id) DO UPDATE SET"
+            "   status=excluded.status, result_json=excluded.result_json",
+            (
+                run_id, name, version, workspace_id,
+                str(result.get("status", "running")),
+                json.dumps(result, sort_keys=True),
+                str(result.get("created_at") or datetime.now(UTC).isoformat()),
+            ),
+        )
+        conn.commit()
+        return True
+
+    def get_ab_run(
+        self, run_id: str, workspace_id: str
+    ) -> dict[str, Any] | None:
+        """Fetch a persisted A/B run scoped to ``workspace_id``."""
+        conn = self._conn
+        if conn is None:
+            return None
+        row = conn.execute(
+            "SELECT * FROM prompt_ab_runs"
+            " WHERE run_id = ? AND workspace_id = ?",
+            (run_id, workspace_id),
+        ).fetchone()
+        if row is None:
+            return None
+        result: dict[str, Any] = json.loads(row["result_json"])
+        result.setdefault("run_id", row["run_id"])
+        result.setdefault("name", row["name"])
+        result.setdefault("version", row["version"])
+        result.setdefault("status", row["status"])
+        result.setdefault("created_at", row["created_at"])
+        return result
 
     # ── metrics ──────────────────────────────────────────────────────────
 

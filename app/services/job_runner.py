@@ -105,6 +105,7 @@ class JobRunner:
         await self._jobs.update_status(workspace_id, job_id, "running")
         task = asyncio.create_task(self._resume(job_id, workspace_id, decision))
         self._tasks[job_id] = task
+        task.add_done_callback(lambda t: self._tasks.pop(job_id, None))
 
     async def expire_stale(self, *, now: datetime | None = None) -> list[JobRecord]:
         """Sweep ``awaiting_review`` jobs idle past ``HITL_EXPIRY_HOURS``.
@@ -132,6 +133,11 @@ class JobRunner:
             if rec is None:
                 continue
             expired.append(rec)
+            # The job can never resume now — release its process-local
+            # state along with any finished task handle.
+            self._last_values.pop(job.job_id, None)
+            self._trace_ids.pop(job.job_id, None)
+            self._tasks.pop(job.job_id, None)
             await self._emit(
                 job.job_id,
                 {
@@ -191,6 +197,8 @@ class JobRunner:
                         await self._handle_chunk(job_id, chunk)
         except Exception as exc:
             logger.exception("job_failed", job_id=job_id)
+            self._last_values.pop(job_id, None)
+            self._trace_ids.pop(job_id, None)
             await self._jobs.update_status(workspace_id, job_id, "failed")
             await self._emit(
                 job_id,
@@ -231,6 +239,8 @@ class JobRunner:
                         await self._handle_chunk(job_id, chunk)
         except Exception as exc:
             logger.exception("resume_failed", job_id=job_id)
+            self._last_values.pop(job_id, None)
+            self._trace_ids.pop(job_id, None)
             await self._emit(
                 job_id,
                 {"node": "runner", "error": str(exc), "terminal": True},
@@ -382,8 +392,13 @@ class JobRunner:
                 status=status,  # type: ignore[arg-type]
             )
         # Awaiting review is a pause, not a terminal state — keep the SSE
-        # stream open so subscribers see events after the resume.
+        # stream open so subscribers see events after the resume, and keep
+        # the process-local state (last values for the checkpoint fallback,
+        # trace id for the resume's trace) until the job is actually done.
         terminal = status in ("done", "failed", "blocked", "expired")
+        if terminal:
+            self._last_values.pop(job_id, None)
+            self._trace_ids.pop(job_id, None)
         await self._emit(
             job_id,
             {"node": "runner", "status": status,
