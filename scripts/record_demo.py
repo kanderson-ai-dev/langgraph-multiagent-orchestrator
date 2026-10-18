@@ -34,6 +34,9 @@ OUT = "docs/screenshots/demo.gif"
 DUR = {
     "landing": 1500,
     "run": 500,
+    # Fast dwell for the pre-HITL transcript scroll — the interesting beats
+    # (HITL modal, sealed report, tab tour) keep their normal pace.
+    "run_fast": 120,
     "hitl": 2800,
     "report": 1500,
     "tab": 3000,
@@ -156,12 +159,14 @@ def main() -> None:
         job_id = page.url.split("job=")[1]
         deadline = time.time() + 480
         status = "running"
+        hitl_seen = False  # transcript frames play fast until the first pause
         while time.time() < deadline:
             job = poll_job(job_id)
             status = job["status"]
             if status in ("done", "failed", "blocked"):
                 break
             if status == "awaiting_review":
+                hitl_seen = True
                 if page.locator("#hitl-modal").is_visible():
                     shot(page, "hitl", 3)
                     pick_hitl_action(page)
@@ -169,8 +174,12 @@ def main() -> None:
                     shot(page, "run")
                     time.sleep(0.6)
                 continue
-            shot(page, "run")
-            time.sleep(0.7)
+            if hitl_seen:
+                shot(page, "run")
+                time.sleep(0.7)
+            else:
+                shot(page, "run_fast")
+                time.sleep(0.5)
 
         # ── Final report: dwell, then scroll through it slowly ────────
         if status == "done":
