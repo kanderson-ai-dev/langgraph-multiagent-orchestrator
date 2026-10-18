@@ -1,5 +1,6 @@
 """Prompt provenance — every LLM call attributable to (name, version, sha256)."""
 
+from pathlib import Path
 from typing import Any
 
 import aiosqlite
@@ -253,6 +254,33 @@ def test_pdf_footer_renders_without_error() -> None:
         footer="Prompt versions: writer v1 · reviewer v1",
     )
     assert pdf[:5] == b"%PDF-" and len(pdf) > 500
+
+
+def test_pdf_unicode_text_embeds_bundled_font() -> None:
+    """Accents, em dashes, curly quotes and CJK must not break export.
+
+    DejaVu covers Latin/Greek/Cyrillic; CJK renders as missing-glyph
+    boxes (documented limitation) — the export itself must still succeed
+    and embed the TTF instead of mangling text through latin-1.
+    """
+    pdf = markdown_to_pdf(
+        "# Análisis técnico\nAdopción en España — “comillas curvas” y "
+        "中文 (CJK renders as boxes).",
+        title="Informe técnico",
+    )
+    assert pdf[:5] == b"%PDF-"
+    assert b"DejaVu" in pdf  # TTF embedded, not latin-1 core fonts
+    assert len(pdf) > 5000  # embedded glyph tables dwarf core-font PDFs
+
+
+def test_pdf_falls_back_to_latin1_without_fonts(
+    monkeypatch: Any,
+) -> None:
+    import app.services.pdf_export as pe
+
+    monkeypatch.setattr(pe, "_FONT_DIR", Path("/nonexistent/fonts"))
+    pdf = markdown_to_pdf("# Títle\nAcción — ok.")
+    assert pdf[:5] == b"%PDF-" and len(pdf) > 200
 
 
 def test_registry_publish_metrics_sets_gauges(prompts: PromptRegistry) -> None:

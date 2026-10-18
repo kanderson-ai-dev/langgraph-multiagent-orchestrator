@@ -12,7 +12,7 @@ content** gathered by the Researcher agent.
 | Direct prompt injection | User-supplied `Brief` (topic, audience, requirements) | `screen_brief` / `screen_input` runs *before* any LLM or external call — blocked input burns zero tokens (`app/graph/guardrails.py`) |
 | Indirect prompt injection | Scraped HTML / parsed PDFs containing embedded instructions | `sanitize_untrusted` (invisible-char normalization + instruction-phrase defanging) applied in the Researcher before text reaches state; treated strictly as *data* in prompts |
 | Prompt leakage | Final report echoing system prompts or reflected instructions | `screen_output` on the assembled report before it ships (OWASP LLM02) |
-| SSRF | Researcher fetching arbitrary URLs | Scheme allowlist (`http`/`https`), private/loopback/link-local IP literals rejected (`app/services/scraper_client.py`) |
+| SSRF | Researcher fetching arbitrary URLs | Scheme allowlist (`http`/`https`); hostnames DNS-resolved and rejected when **any** answer is private/loopback/link-local/reserved/multicast/unspecified; every redirect hop re-vetted (bounded at `SCRAPE_MAX_REDIRECTS`) — `app/services/scraper_client.py` |
 | Credential leakage | Logs, errors, config | `SecretStr` config, `structlog` field redaction, generic 401s, no secrets in query strings |
 | Auth bypass | Job/report endpoints | JWT when `JWT_SECRET_KEY` is set; all routes scoped by `workspace_id` (multi-tenant isolation) |
 | Rate abuse | `/auth/login`, job submission | Sliding-window `RateLimiter` protocol — in-memory default, Redis backend for multi-replica (`app/core/rate_limit.py`) |
@@ -113,10 +113,14 @@ real scraped HTML and LLM payloads. Before a cassette is committed:
 
 - In-memory rate limiter does not coordinate across replicas (documented in
   code and README).
-- SSRF guard rejects IP *literals*; DNS-rebinding protection (resolving
-  hostnames to private ranges) is a documented next step.
-- robots.txt fetch failures default to *allow* with a log line — trade-off
-  documented in `scraper_client.py`.
+- SSRF: hostnames are DNS-resolved and every redirect hop re-vetted, but
+  the check and the connect are two moments — a hostile domain could flip
+  answers between them (TOCTOU). Fully closing it means connecting to the
+  vetted IP with Host/SNI preserved (custom httpx transport) — a
+  documented next step.
+- robots.txt: 4xx → allow (RFC 9309); 5xx/timeouts →
+  `SCRAPE_ROBOTS_FAIL_POLICY` (`allow` default for politeness, `deny`
+  for strict deployments).
 - Audit signatures authenticate the chain tip against **DB-only** attackers.
   An attacker who also steals `AUDIT_SIGNING_KEY` can forge signatures — the
   key must live outside the DB (env/secret manager). There is no key

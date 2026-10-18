@@ -73,12 +73,20 @@ def _replay_settings() -> Settings:
 
 
 @pytest.mark.parametrize("case_id", CASES_TO_RECORD)
-async def test_recorded_case_replays_offline(case_id: str) -> None:
+async def test_recorded_case_replays_offline(
+    case_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     cassette = CASSETTE_DIR / f"edd_{case_id}.yaml"
     if not cassette.exists():
         pytest.skip(f"cassette {cassette.name} not recorded")
     case = next(c for c in DATASET if c.case_id == case_id)
     settings = _replay_settings()
+    # The scraper's SSRF DNS check must not hit the network in replay —
+    # vcrpy serves the recorded response for every hostname anyway.
+    async def _fake_resolve(self: Any, host: str) -> list[str]:
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(ScraperClient, "_resolve_addresses", _fake_resolve)
     graph = build_graph(
         settings,
         llm=OpenAIStructuredLLM(settings),

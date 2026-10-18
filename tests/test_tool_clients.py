@@ -1,5 +1,7 @@
 """Tool clients: search, scraper, document parser — fully mocked."""
 
+from typing import Any
+
 import httpx
 import pytest
 import respx
@@ -70,6 +72,16 @@ def scraper_settings() -> Settings:
     )
 
 
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch: Any) -> None:
+    """Default: every hostname resolves to a public IP — tests stay
+    offline and only override when the case is about DNS itself."""
+    async def fake(self: ScraperClient, host: str) -> list[str]:
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(ScraperClient, "_resolve_addresses", fake)
+
+
 @respx.mock
 async def test_scraper_fetches_and_caps_bytes(scraper_settings: Settings) -> None:
     respx.get("https://ok.test/page").mock(
@@ -104,6 +116,179 @@ async def test_scraper_blocks_private_ip_literals(scraper_settings: Settings) ->
     for url in ("http://127.0.0.1/x", "http://10.0.0.1/y", "http://169.254.169.254/meta"):
         with pytest.raises(ScrapeError):
             await s.scrape(url)
+
+
+# ─── SSRF via DNS (Phase 17) ─────────────────────────────────────────────────
+
+_PUBLIC_IP = "93.184.216.34"  # example.com-ish; only the value matters
+
+
+def _dns(monkeypatch: Any, addrs: list[str]) -> None:
+    async def fake(self: ScraperClient, host: str) -> list[str]:
+        return addrs
+
+    monkeypatch.setattr(ScraperClient, "_resolve_addresses", fake)
+
+
+async def test_scraper_blocks_hostname_resolving_to_loopback(
+    scraper_settings: Settings, monkeypatch: Any
+) -> None:
+    _dns(monkeypatch, ["127.0.0.1"])
+    s = ScraperClient(scraper_settings)
+    with pytest.raises(ScrapeError, match="disallowed address"):
+        await s.scrape("https://sneaky.test/x")
+
+
+async def test_scraper_blocks_hostname_resolving_to_metadata(
+    scraper_settings: Settings, monkeypatch: Any
+) -> None:
+    _dns(monkeypatch, ["169.254.169.254"])
+    s = ScraperClient(scraper_settings)
+    with pytest.raises(ScrapeError, match="disallowed address"):
+        await s.scrape("https://sneaky.test/meta")
+
+
+async def test_scraper_blocks_when_any_resolved_address_is_private(
+    scraper_settings: Settings, monkeypatch: Any
+) -> None:
+    # One public + one private A record → still refused.
+    _dns(monkeypatch, [_PUBLIC_IP, "10.1.2.3"])
+    s = ScraperClient(scraper_settings)
+    with pytest.raises(ScrapeError, match="disallowed address"):
+        await s.scrape("https://sneaky.test/x")
+
+
+@respx.mock
+async def test_scraper_allows_hostname_resolving_public(
+    scraper_settings: Settings, monkeypatch: Any
+) -> None:
+    _dns(monkeypatch, [_PUBLIC_IP])
+    respx.get("https://ok.test/p").mock(return_value=httpx.Response(200))
+    s = ScraperClient(scraper_settings)
+    page = await s.scrape("https://ok.test/p")
+    assert page.status_code == 200
+
+
+@respx.mock
+async def test_scraper_blocks_redirect_to_private_ip(
+    scraper_settings: Settings, monkeypatch: Any
+) -> None:
+    _dns(monkeypatch, [_PUBLIC_IP])
+    respx.get("https://ok.test/go").mock(
+        return_value=httpx.Response(
+            302, headers={"location": "http://169.254.169.254/latest"}
+        )
+    )
+    s = ScraperClient(scraper_settings)
+    with pytest.raises(ScrapeError):
+        await s.scrape("https://ok.test/go")
+
+
+@respx.mock
+async def test_scraper_blocks_redirect_to_dns_private_host(
+    scraper_settings: Settings, monkeypatch: Any
+) -> None:
+    _dns(monkeypatch, ["10.9.9.9"])
+    respx.get("https://ok.test/go").mock(
+        return_value=httpx.Response(
+            302, headers={"location": "https://internal.test/secret"}
+        )
+    )
+    s = ScraperClient(scraper_settings)
+    with pytest.raises(ScrapeError, match="disallowed address"):
+        await s.scrape("https://ok.test/go")
+
+
+@respx.mock
+async def test_scraper_follows_public_redirects_within_limit(
+    scraper_settings: Settings, monkeypatch: Any
+) -> None:
+    _dns(monkeypatch, [_PUBLIC_IP])
+    respx.get("https://ok.test/a").mock(
+        return_value=httpx.Response(
+            301, headers={"location": "https://ok.test/b"}
+        )
+    )
+    respx.get("https://ok.test/b").mock(
+        return_value=httpx.Response(200, content=b"final")
+    )
+    s = ScraperClient(scraper_settings)
+    page = await s.scrape("https://ok.test/a")
+    assert page.status_code == 200 and page.url == "https://ok.test/b"
+
+
+@respx.mock
+async def test_scraper_redirect_limit(
+    scraper_settings: Settings, monkeypatch: Any
+) -> None:
+    _dns(monkeypatch, [_PUBLIC_IP])
+    for i in range(5):
+        respx.get(f"https://ok.test/r{i}").mock(
+            return_value=httpx.Response(
+                302, headers={"location": f"https://ok.test/r{i+1}"}
+            )
+        )
+    s = ScraperClient(scraper_settings)
+    with pytest.raises(ScrapeError, match="redirect limit"):
+        await s.scrape("https://ok.test/r0")
+
+
+# ─── robots.txt failure policy (Phase 17) ────────────────────────────────────
+
+
+def _robots_settings(**kw: Any) -> Settings:
+    base = {
+        "_env_file": None,
+        "scrape_delay_seconds": 0.0,
+        "scrape_respect_robots": True,
+        "scrape_max_bytes": 1024,
+    }
+    base.update(kw)
+    return Settings(**base)  # type: ignore[arg-type]
+
+
+@respx.mock
+async def test_robots_4xx_allows_fetch(monkeypatch: Any) -> None:
+    _dns(monkeypatch, [_PUBLIC_IP])
+    respx.get("https://ok.test/robots.txt").mock(
+        return_value=httpx.Response(404)
+    )
+    respx.get("https://ok.test/p").mock(return_value=httpx.Response(200))
+    s = ScraperClient(_robots_settings())
+    assert (await s.scrape("https://ok.test/p")).status_code == 200
+
+
+@respx.mock
+async def test_robots_5xx_default_policy_allows(monkeypatch: Any) -> None:
+    _dns(monkeypatch, [_PUBLIC_IP])
+    respx.get("https://ok.test/robots.txt").mock(
+        return_value=httpx.Response(503)
+    )
+    respx.get("https://ok.test/p").mock(return_value=httpx.Response(200))
+    s = ScraperClient(_robots_settings())  # default policy: allow
+    assert (await s.scrape("https://ok.test/p")).status_code == 200
+
+
+@respx.mock
+async def test_robots_5xx_deny_policy_blocks(monkeypatch: Any) -> None:
+    _dns(monkeypatch, [_PUBLIC_IP])
+    respx.get("https://ok.test/robots.txt").mock(
+        return_value=httpx.Response(503)
+    )
+    s = ScraperClient(_robots_settings(scrape_robots_fail_policy="deny"))
+    with pytest.raises(ScrapeError, match="robots"):
+        await s.scrape("https://ok.test/p")
+
+
+@respx.mock
+async def test_robots_timeout_obeys_deny_policy(monkeypatch: Any) -> None:
+    _dns(monkeypatch, [_PUBLIC_IP])
+    respx.get("https://ok.test/robots.txt").mock(
+        side_effect=httpx.ConnectTimeout("boom")
+    )
+    s = ScraperClient(_robots_settings(scrape_robots_fail_policy="deny"))
+    with pytest.raises(ScrapeError, match="robots"):
+        await s.scrape("https://ok.test/p")
 
 
 # ─── Document parser ─────────────────────────────────────────────────────────

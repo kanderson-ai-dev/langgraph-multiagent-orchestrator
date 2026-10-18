@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     scrape_timeout_seconds: float = Field(default=15.0, gt=0.0)
     scrape_max_bytes: int = Field(default=1_048_576, gt=0)
     scrape_respect_robots: bool = True
+    # Policy when robots.txt is unreadable for reasons other than a 4xx
+    # (5xx, timeout, transport error): RFC 9309 treats unreachable robots
+    # as "allow" while server errors may be treated as disallow. "allow"
+    # keeps the polite-but-permissive default; "deny" is the strict mode.
+    scrape_robots_fail_policy: Literal["allow", "deny"] = "allow"
+    # Max redirect hops followed per fetch — every hop's destination is
+    # re-validated (scheme + DNS-resolved address) before connecting.
+    scrape_max_redirects: int = Field(default=3, ge=0, le=10)
     # Bounds total in-flight fetches when callers scrape many URLs in
     # parallel; per-domain politeness still applies on top.
     scrape_max_concurrency: int = Field(default=5, ge=1, le=20)

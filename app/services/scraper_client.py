@@ -51,6 +51,10 @@ class ScrapeError(Exception):
     """Raised when a URL cannot or must not be fetched."""
 
 
+class _RobotsUnreachable(Exception):
+    """robots.txt fetch failed server-side (5xx) — policy decides."""
+
+
 class ScraperClient:
     """Async fetcher enforcing politeness, robots.txt and SSRF guards."""
 
@@ -81,12 +85,64 @@ class ScraperClient:
             raise ScrapeError(f"disallowed scheme: {parsed.scheme!r}")
         if not parsed.hostname:
             raise ScrapeError("URL has no hostname")
-        try:  # SSRF guard: reject literal private/loopback IPs
+        try:  # SSRF guard, literal IPs: reject non-public addresses
             ip = ipaddress.ip_address(parsed.hostname)
-            if ip.is_private or ip.is_loopback or ip.is_link_local:
+            if self._bad_address(ip):
                 raise ScrapeError(f"disallowed address: {parsed.hostname}")
         except ValueError:
-            pass  # hostname, not an IP literal
+            pass  # hostname, not an IP literal — DNS-checked below
+        return url
+
+    @staticmethod
+    def _bad_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        """Any address a server-side fetch must never connect to."""
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        )
+
+    async def _resolve_addresses(self, host: str) -> list[str]:
+        """DNS resolution — a single seam so tests can fake the resolver."""
+        loop = asyncio.get_running_loop()
+        infos = await loop.getaddrinfo(host, None, proto=6)  # TCP only
+        return sorted({str(info[4][0]) for info in infos})
+
+    async def _check_destination(self, url: str) -> str:
+        """Full SSRF gate for a fetch target: scheme + literal IP + DNS.
+
+        A hostname is resolved and rejected when *any* returned address
+        is non-public — a public-looking host can still resolve to
+        loopback, link-local metadata endpoints or private ranges.
+
+        Known residual gap (TOCTOU): DNS is checked here, then httpx
+        resolves again at connect time — a hostile domain could flip
+        answers between the two. Fully closing it means connecting to the
+        vetted IP while preserving Host/SNI, which needs a custom httpx
+        transport; documented as a next step in SECURITY.md.
+        """
+        url = self._validate_url(url)
+        host = urllib.parse.urlparse(url).hostname or ""
+        try:
+            ipaddress.ip_address(host)
+            return url  # literal already vetted by _validate_url
+        except ValueError:
+            pass
+        try:
+            addrs = await self._resolve_addresses(host)
+        except OSError as exc:
+            raise ScrapeError(f"cannot resolve {host!r}: {exc}") from exc
+        for raw in addrs:
+            try:
+                if self._bad_address(ipaddress.ip_address(raw)):
+                    raise ScrapeError(
+                        f"host {host!r} resolves to disallowed address {raw}"
+                    )
+            except ValueError:
+                raise ScrapeError(f"host {host!r} resolved to {raw!r}") from None
         return url
 
     async def _robots_allowed(self, url: str) -> bool:
@@ -104,12 +160,37 @@ class ScraperClient:
                         # redirect handling as page fetches — and visible to
                         # VCR cassettes for deterministic offline replay.
                         resp = await self._fetch(f"{origin}/robots.txt")
+                        if resp.status_code >= 500:
+                            raise _RobotsUnreachable(f"HTTP {resp.status_code}")
                         if resp.status_code >= 400:
-                            raise ScrapeError(f"HTTP {resp.status_code}")
+                            # RFC 9309: 4xx → no robots.txt → allow.
+                            self._robots[origin] = None
+                            logger.info(
+                                "robots_txt_absent",
+                                origin=origin, status=resp.status_code,
+                            )
+                            return True
                         candidate.parse(resp.text.splitlines())
-                    except Exception:  # unreadable robots.txt → allow, logged
+                    except _RobotsUnreachable as exc:
                         self._robots[origin] = None
-                        logger.info("robots_txt_unreadable", origin=origin)
+                        allowed = (
+                            self._settings.scrape_robots_fail_policy == "allow"
+                        )
+                        logger.info(
+                            "robots_txt_unreachable",
+                            origin=origin, reason=str(exc), policy=allowed,
+                        )
+                        return allowed
+                    except Exception as exc:  # timeout/transport → policy
+                        self._robots[origin] = None
+                        allowed = (
+                            self._settings.scrape_robots_fail_policy == "allow"
+                        )
+                        logger.info(
+                            "robots_txt_unreachable",
+                            origin=origin, reason=repr(exc), policy=allowed,
+                        )
+                        return allowed
                     else:
                         self._robots[origin] = candidate
         rp = self._robots[origin]
@@ -158,9 +239,33 @@ class ScraperClient:
         reraise=True,
     )
     async def _fetch(self, url: str) -> httpx.Response:
+        """GET with manual redirect following — every hop re-validated.
+
+        ``follow_redirects=True`` would let a 30x bounce the fetch to an
+        unchecked host (e.g. public page redirecting to 169.254.169.254).
+        Each ``Location`` instead goes through ``_check_destination``
+        (scheme + literal IP + DNS) before the next request, capped at
+        ``scrape_max_redirects`` hops.
+        """
         headers = {"User-Agent": _USER_AGENT}
         client = await self._shared_client()
-        return await client.get(url, headers=headers, follow_redirects=True)
+        current = await self._check_destination(url)
+        for _hop in range(self._settings.scrape_max_redirects + 1):
+            resp = await client.get(
+                current, headers=headers, follow_redirects=False
+            )
+            if not resp.is_redirect:
+                return resp
+            location = resp.headers.get("location", "")
+            if not location:
+                return resp
+            current = await self._check_destination(
+                urllib.parse.urljoin(current, location)
+            )
+        raise ScrapeError(
+            f"redirect limit ({self._settings.scrape_max_redirects}) "
+            f"exceeded for {url}"
+        )
 
     async def _cache_get(self, url: str, workspace_id: str) -> ScrapedPage | None:
         if self._cache is None or not workspace_id:
