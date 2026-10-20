@@ -296,7 +296,9 @@ def _report_footer(job: Any) -> str:
     raw = job.result.get("prompt_versions")
     if not isinstance(raw, dict) or not raw:
         return ""
-    rendered = " · ".join(f"{n} v{v}" for n, v in sorted(raw.items()))
+    rendered = " · ".join(
+        f"{n.replace('_', ' ').title()} v{v}" for n, v in sorted(raw.items())
+    )
     return f"Prompt versions: {rendered}"
 
 

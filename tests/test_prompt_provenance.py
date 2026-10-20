@@ -1,10 +1,12 @@
 """Prompt provenance — every LLM call attributable to (name, version, sha256)."""
 
+import io
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
 from prometheus_client import REGISTRY
+from pypdf import PdfReader
 
 from app.core.config import Settings
 from app.core.cost_tracking import UsageTracker, bind_tracker, tracked_structured
@@ -281,6 +283,30 @@ def test_pdf_falls_back_to_latin1_without_fonts(
     monkeypatch.setattr(pe, "_FONT_DIR", Path("/nonexistent/fonts"))
     pdf = markdown_to_pdf("# Títle\nAcción — ok.")
     assert pdf[:5] == b"%PDF-" and len(pdf) > 200
+
+
+def test_pdf_sources_are_text_without_link_annotations() -> None:
+    """Source URLs render as visible text, never as ``/URI`` annotations.
+
+    Heuristic AV engines quarantine freshly generated PDFs dense with
+    embedded external links as phishing lures (``Trojan:Script/Phishing``),
+    so the exporter must not emit ``/Annot``/``/URI`` objects. Viewers
+    auto-linkify the printed URL text instead.
+    """
+    pdf = markdown_to_pdf(
+        "# Report\n\n## Sources\n\n"
+        "- [Vanta](https://vanta.com/pricing)\n"
+        "- Vendor X · Publisher [source 1](https://drata.com/pricing)\n"
+        "- Claim — https://example.com/evidence #a1b2\n",
+        title="t",
+    )
+    assert pdf[:5] == b"%PDF-"
+    assert b"/URI" not in pdf and b"/Annot" not in pdf
+    text = "".join(
+        p.extract_text() or "" for p in PdfReader(io.BytesIO(pdf)).pages
+    ).replace("\n", "")
+    assert "https://vanta.com/pricing" in text
+    assert "source 1 — https://drata.com/pricing" in text
 
 
 def test_registry_publish_metrics_sets_gauges(prompts: PromptRegistry) -> None:

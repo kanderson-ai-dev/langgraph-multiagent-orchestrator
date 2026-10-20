@@ -3,7 +3,7 @@
  * citation footnotes reference as `#<sha12>`). */
 
 import { api, apiPost } from "../api.js";
-import { $, escapeHtml, md, toast } from "../util.js";
+import { $, escapeHtml, md, prettyName, toast } from "../util.js";
 
 /* The job whose report is on the card — audit/exports/feedback must target
  * this, not `state.currentJob`, which another in-flight attachJob may have
@@ -89,7 +89,7 @@ function renderPromptVersions(versions) {
   for (const [name, ver] of entries) {
     const chip = document.createElement("span");
     chip.className = "chip chip-mono chip-prompt";
-    chip.textContent = `${name}@v${ver}`;
+    chip.textContent = `${prettyName(name)} v${ver}`;
     chip.title = `prompt ${name} version ${ver}`;
     box.appendChild(chip);
   }

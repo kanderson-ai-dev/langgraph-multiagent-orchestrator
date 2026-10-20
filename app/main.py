@@ -240,6 +240,10 @@ def create_app() -> FastAPI:
         response.headers.setdefault(
             "Content-Security-Policy", _csp_for(request.url.path)
         )
+        if request.url.path.startswith("/console"):
+            # Console ES-module imports carry no ?v= buster, so heuristic
+            # caching can serve stale JS after a deploy — force revalidation.
+            response.headers.setdefault("Cache-Control", "no-cache")
         return response
 
     app.include_router(status_router)

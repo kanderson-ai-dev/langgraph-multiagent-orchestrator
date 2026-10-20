@@ -573,7 +573,7 @@ def test_qa_matrix_row(case: Case, tmp_path: Path) -> None:
 
             if case.promote_first:
                 chips = page.inner_text("#prompt-versions")
-                assert "writer" in chips and "v2" in chips
+                assert "writer" in chips.lower() and "v2" in chips
 
             # Reload after completion: state restores identically.
             page.reload()
