@@ -92,8 +92,14 @@ real scraped HTML and LLM payloads. Before a cassette is committed:
 - **LLM03 Supply Chain** — `pip-audit` in CI; pinned `uv.lock`;
   `requirements.txt` generated, not hand-edited.
 - **LLM05 Improper Output Handling** — citations verified against fetched
-  source text (verbatim/punctuation-insensitive/≥0.85 fuzzy); unverifiable
-  claims are dropped and counted.
+  source text (verbatim → punctuation-insensitive → ≥0.85 fuzzy window
+  **plus a critical-token check**: the digits, post-number units, and
+  negations must match the best window exactly, and every capitalized
+  entity / currency symbol in the quote must appear there). A swapped
+  "12%"→"21%", a dropped "not", or a renamed entity fails regardless of
+  ratio. Unverifiable claims are dropped and counted. Residual honesty:
+  paraphrase/synonym matching is still statistical — "supported" means
+  *verifiably present under these checks*, not independently fact-checked.
 - **LLM06 Excessive Agency** — the Supervisor's dispatch budget
   (`max_dispatches`) and the debate bound (`max_debate_rounds`) make
   termination structural; HITL escalation on exhaustion. The spend cap is

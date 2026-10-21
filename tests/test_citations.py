@@ -85,3 +85,75 @@ def test_citation_must_match_cited_source_only() -> None:
     assert unknown == 1  # only the phantom URL was never fetched
     assert kept == [draft.citations[2]]
     assert hashes == ["a" * 64]
+
+
+# ─── critical-token check: a high fuzzy ratio must not launder a changed
+# number, negation, year, unit/currency, or entity ────────────────────────────
+
+
+def test_changed_number_is_unsupported() -> None:
+    src = "Acme reported that revenue grew 12% in 2023 across all regions."
+    # One digit swapped — the ratio still clears 0.85 without the check.
+    assert not citation_supported("revenue grew 21% in 2023", src)
+    assert citation_supported("revenue grew 12% in 2023", src)
+
+
+def test_changed_negation_is_unsupported() -> None:
+    src = "The regulator did not approve the merger in the last quarter."
+    assert not citation_supported("the regulator did approve the merger", src)
+    assert citation_supported("the regulator did not approve the merger", src)
+
+
+def test_changed_year_is_unsupported() -> None:
+    src = "The protocol was finalized in 2023 after two years of drafts."
+    assert not citation_supported("the protocol was finalized in 2024", src)
+
+
+def test_changed_currency_is_unsupported() -> None:
+    src = "The contract was valued at €5 million last year."
+    assert not citation_supported("the contract was valued at $5 million", src)
+
+
+def test_changed_unit_is_unsupported() -> None:
+    src = "The dataset weighs 5 GB uncompressed on disk."
+    assert not citation_supported("the dataset weighs 5 TB uncompressed", src)
+
+
+def test_changed_entity_is_unsupported() -> None:
+    src = (
+        "In the benchmark, LangGraph outperformed the baseline on every "
+        "multi-step planning task."
+    )
+    assert not citation_supported(
+        "in the benchmark, LangChain outperformed the baseline", src
+    )
+    assert citation_supported(
+        "in the benchmark, LangGraph outperformed the baseline", src
+    )
+
+
+def test_benign_variation_still_supported() -> None:
+    """Case, whitespace, punctuation and small paraphrase drift remain
+    supported — the check only vetoes *critical* token changes."""
+    src = (
+        "LangGraph is a framework for building stateful, multi-agent "
+        "applications with LLMs."
+    )
+    assert citation_supported(
+        "langgraph is a framework for building stateful multi agent applications",
+        src,
+    )
+    assert citation_supported(
+        "LangGraph is a framework for building stateful, multi-agent applications",
+        src,
+    )
+
+
+def test_number_outside_best_window_still_checks() -> None:
+    """The critical token must be inside the matched window — a source
+    that mentions the right number elsewhere does not rescue the quote."""
+    src = (
+        "Revenue reached 21 billion last year. Separately, analysts noted "
+        "that revenue grew 12% in 2023 across all regions."
+    )
+    assert not citation_supported("revenue grew 21% in 2023", src)

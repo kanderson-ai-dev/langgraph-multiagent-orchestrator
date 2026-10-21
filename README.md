@@ -66,6 +66,13 @@ the standard of a paid engagement, not a portfolio toy.
   rounds (`MAX_DEBATE_ROUNDS`); the Reviewer grades against a rubric and
   verifies citation support. Exhausted rounds escalate — guaranteed
   termination is proven by a dedicated test, not by luck.
+  "Supported" means the quote is verifiably present in the cited source:
+  verbatim, punctuation-insensitive, or a ≥0.85 fuzzy window that also
+  passes a **critical-token check** — digits, units-after-numbers, and
+  negations must match the window exactly, and every capitalized entity
+  and currency symbol must appear there (a swapped "12%"→"21%" or a
+  dropped "not" fails regardless of similarity). Prose paraphrase stays
+  statistical — the verifier checks presence, not ground truth.
 - 🔏 **Tamper-evident delivery.** Every transcript entry joins a SHA-256
   hash chain; the report carries its `audit_root`, and
   `GET /reports/{id}/audit` lets anyone re-verify the chain. Set
