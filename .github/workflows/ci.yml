@@ -99,15 +99,21 @@ jobs:
 
       - name: Container smoke test
         run: |
-          docker run -d --name app -p 8000:8000 orchestrator:ci
+          # Host port 18000: even a leaked `app` can never collide with the
+          # compose smoke below, which publishes :8000.
+          docker run -d --name app -p 18000:8000 orchestrator:ci
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:8000/api/v1/health > /dev/null; then break; fi
+            if curl -sf http://localhost:18000/api/v1/health > /dev/null; then break; fi
             sleep 2
           done
-          curl -sf http://localhost:8000/api/v1/health | tee health.json
+          curl -sf http://localhost:18000/api/v1/health | tee health.json
           test "$(docker exec app id -u)" = "10001" || {
             echo "container must not run as root"; exit 1; }
           docker logs app | tail -20
+          # Success path only: free the name before the compose smoke. On
+          # failure bash -e skips this line, leaving `app` for the
+          # failure-logs step below.
+          docker rm -f app
 
       - name: Compose smoke test
         run: |

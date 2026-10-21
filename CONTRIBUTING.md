@@ -36,6 +36,11 @@ gitleaks detect                                       # no secrets in history
 uv run pip-audit --strict                             # after dependency changes
 uv lock --check                                       # after touching uv.lock
 docker build -t orchestrator:check .                  # after Dockerfile/compose changes
+# docker smoke as CI runs it (container on :18000, then compose on :8000):
+docker run -d --name app -p 18000:8000 orchestrator:check && sleep 4 \
+  && curl -sf http://localhost:18000/api/v1/health && docker rm -f app
+docker compose up -d --wait orchestrator \
+  && curl -sf http://localhost:8000/api/v1/health && docker compose down -v
 ```
 
 On Windows, bare `python`/`pytest` may be an older Python — always go through
