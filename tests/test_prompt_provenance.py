@@ -261,9 +261,9 @@ def test_pdf_footer_renders_without_error() -> None:
 def test_pdf_unicode_text_embeds_bundled_font() -> None:
     """Accents, em dashes, curly quotes and CJK must not break export.
 
-    DejaVu covers Latin/Greek/Cyrillic; CJK renders as missing-glyph
-    boxes (documented limitation) — the export itself must still succeed
-    and embed the TTF instead of mangling text through latin-1.
+    DejaVu covers Latin/Greek/Cyrillic; CJK becomes ``□`` placeholders
+    plus a notice (documented limitation) — the export itself must still
+    succeed and embed the TTF instead of mangling text through latin-1.
     """
     pdf = markdown_to_pdf(
         "# Análisis técnico\nAdopción en España — “comillas curvas” y "
@@ -273,6 +273,29 @@ def test_pdf_unicode_text_embeds_bundled_font() -> None:
     assert pdf[:5] == b"%PDF-"
     assert b"DejaVu" in pdf  # TTF embedded, not latin-1 core fonts
     assert len(pdf) > 5000  # embedded glyph tables dwarf core-font PDFs
+
+
+def test_pdf_unsupported_glyphs_get_placeholder_and_notice() -> None:
+    """CJK/Thai/Indic scripts DejaVu cannot render become ``□`` + a notice.
+
+    A bundled CJK font would add ~15–20 MB to the image; instead the
+    exporter replaces every glyph-less code point with a visible
+    placeholder and prints a one-line notice near the title — honest
+    degradation instead of silent boxes.
+    """
+    pdf = markdown_to_pdf(
+        "# Report\n中文、日本語、ไทย、देवनागरी mixed with English text.",
+        title="t",
+    )
+    assert pdf[:5] == b"%PDF-"
+    text = "".join(
+        p.extract_text() or "" for p in PdfReader(io.BytesIO(pdf)).pages
+    )
+    assert "unsupported" in text.lower()
+    assert "□" in text
+    # The placeholder replaces the glyphs — the raw CJK text itself is gone.
+    assert "中文" not in text
+    assert "English text" in text
 
 
 def test_pdf_falls_back_to_latin1_without_fonts(

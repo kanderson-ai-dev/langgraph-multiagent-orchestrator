@@ -4,10 +4,12 @@ Fonts: a bundled DejaVu Sans TTF family (see ``app/assets/fonts/``,
 Bitstream Vera / Arev public license in ``LICENSE``) gives real Unicode
 output — Latin/Latin-Extended, Greek, Cyrillic, Hebrew, Georgian,
 Armenian and common symbols. Scripts outside DejaVu's coverage (notably
-CJK, Thai, most Indic scripts) render as missing-glyph boxes rather than
-crashing — documented in README "Known Limitations". When the font files
-are absent the exporter degrades to FPDF's latin-1 core fonts with
-unrepresentable characters replaced, exactly like before.
+CJK, Thai, most Indic scripts) are replaced with a visible ``□``
+placeholder plus a one-line notice in the exported report — honest
+degradation instead of silent missing-glyph boxes (a bundled CJK font
+would add ~15–20 MB to the image). When the font files are absent the
+exporter degrades to FPDF's latin-1 core fonts with unrepresentable
+characters replaced, exactly like before.
 
 Markdown coverage mirrors the console renderer (``frontend/console/js/
 util.js``): heading levels map to descending font sizes, unordered and
@@ -60,6 +62,41 @@ _FONT_FILES = {
     "B": "DejaVuSans-Bold.ttf",
     "I": "DejaVuSans-Oblique.ttf",
 }
+# U+25A1 WHITE SQUARE — inside DejaVu's coverage; the latin-1 fallback
+# path replaces with "?" natively.
+_PLACEHOLDER = "□"
+
+_cmap: frozenset[int] | None = None
+
+
+def _dejavu_cmap() -> frozenset[int]:
+    """Supported code points of the bundled family — read once per process."""
+    global _cmap
+    if _cmap is None:
+        from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
+
+        font = TTFont(str(_FONT_DIR / _FONT_FILES[""]))
+        _cmap = frozenset(font.getBestCmap())
+    return _cmap
+
+
+def _unsupported_chars(text: str, unicode_font: bool) -> frozenset[str]:
+    """Characters the chosen output font cannot render."""
+    if unicode_font:
+        try:
+            cmap = _dejavu_cmap()
+        except Exception:  # fontTools missing/broken font → keep old behaviour
+            return frozenset()
+        return frozenset(
+            ch for ch in text if ord(ch) > 0x7F and ord(ch) not in cmap
+        )
+    return frozenset(ch for ch in text if ord(ch) > 0xFF)
+
+
+def _replace_unsupported(text: str, missing: frozenset[str]) -> str:
+    if not missing:
+        return text
+    return "".join(_PLACEHOLDER if ch in missing else ch for ch in text)
 
 
 def _font_family(pdf: FPDF) -> str:
@@ -94,6 +131,7 @@ def _url_row(
     url: str,
     tail: str,
     label: str = "",
+    missing: frozenset[str] = frozenset(),
 ) -> None:
     """One row of link-looking text — blue, underlined, no annotation.
 
@@ -106,7 +144,11 @@ def _url_row(
     pdf.set_font(family, "U", 9)
     pdf.set_text_color(5, 99, 193)
     text = f"{label} — {url}" if label else url
-    text = text if unicode_font else _latin1(text)
+    text = (
+        _replace_unsupported(text, missing)
+        if unicode_font
+        else _latin1(text)
+    )
     if pdf.get_string_width(text) <= avail:
         pdf.cell(
             pdf.get_string_width(text) + 1, 5, text,
@@ -129,9 +171,10 @@ def _url_row(
     pdf.set_font(family, "", 11)
 
 
-def _safe(text: str, *, unicode_font: bool) -> str:
-    if not unicode_font:
-        text = _latin1(text)
+def _safe(
+    text: str, *, unicode_font: bool, missing: frozenset[str] = frozenset()
+) -> str:
+    text = _replace_unsupported(text, missing) if unicode_font else _latin1(text)
     return " ".join(
         w
         if len(w) <= _MAX_WORD
@@ -159,10 +202,14 @@ def markdown_to_pdf(
     pdf.set_producer("fpdf2")
     pdf.set_lang("en")
     pdf.add_page()
+    missing = _unsupported_chars(title + markdown + footer, unicode_font)
+    # latin-1 output already replaces with "?" natively; only the Unicode
+    # path needs the explicit placeholder pass.
+    visible = missing if unicode_font else frozenset()
 
     def line(text: str, *, h: float = 6.0) -> None:
         pdf.multi_cell(
-            0, h, _safe(text, unicode_font=unicode_font),
+            0, h, _safe(text, unicode_font=unicode_font, missing=visible),
             new_x=XPos.LMARGIN, new_y=YPos.NEXT,
         )
 
@@ -181,6 +228,17 @@ def markdown_to_pdf(
     pdf.set_font(family, "B", 16)
     line(title[:120], h=10)
     pdf.ln(4)
+    if missing:
+        pdf.set_font(family, "I", 9)
+        pdf.set_text_color(110, 110, 110)
+        placeholder = _PLACEHOLDER if unicode_font else "?"
+        line(
+            f"Note: {len(missing)} unsupported character(s) were replaced "
+            f"with {placeholder} (font coverage limit).",
+            h=5.0,
+        )
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font(family, "", 11)
 
     for raw in markdown.splitlines():
         stripped = raw.strip()
@@ -202,7 +260,7 @@ def markdown_to_pdf(
         if m:  # "- [label](url)" → label line + visible URL row
             marker = (m.group(1) or "").strip()
             line((f"  {marker} " if marker else "") + _plain(m.group(2)))
-            _url_row(pdf, family, unicode_font, m.group(3), "")
+            _url_row(pdf, family, unicode_font, m.group(3), "", missing=visible)
             continue
         m = _MD_LINK_TAIL.search(stripped)
         if m and m.start(0) > 0:  # head text … [label](url) at end of line
@@ -211,6 +269,7 @@ def markdown_to_pdf(
             _url_row(
                 pdf, family, unicode_font, m.group(2),
                 (m.group(3) or "").strip(), label=_plain(m.group(1)),
+                missing=visible,
             )
             continue
         m = _MD_URL_TAIL.search(stripped)
@@ -219,7 +278,10 @@ def markdown_to_pdf(
             url = m.group(1).rstrip(").,;]>\"'")
             if head:
                 text_line(head)
-            _url_row(pdf, family, unicode_font, url, (m.group(2) or "").strip())
+            _url_row(
+                pdf, family, unicode_font, url, (m.group(2) or "").strip(),
+                missing=visible,
+            )
             continue
         text_line(stripped)
     if footer:
