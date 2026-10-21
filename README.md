@@ -53,10 +53,15 @@ the standard of a paid engagement, not a portfolio toy.
   that sees the live state and picks the next worker — or emits parallel
   `Send()` dispatches under a mandate. Guards against pathological loops are
   structural: per-worker dispatch caps + global bounds + budget enforcement.
-- 💰 **Cost-governed autonomy.** A per-job `budget_usd` is enforced *before*
-  each dispatch — when the cap is hit the job escalates to a human who can
-  **fund and continue**, approve, edit, or reject. The console shows cost by
-  agent role in real time.
+- 💰 **Cost-governed autonomy.** A per-job `budget_usd` is enforced twice:
+  *before each dispatch* (accrued cost ≥ cap → escalate) and *before every
+  metered call* — a worst-case estimate (prompt tokens via tiktoken +
+  configured max completion, priced per model, × `1 + max_retries`) that
+  can't fit the remaining budget is refused and the job escalates to a
+  human who can **fund and continue**, approve, edit, or reject. When a
+  smaller completion still fits, the call runs with a clamped
+  `max_completion_tokens` instead. `0` = zero cap; unset = unlimited.
+  The console shows cost by agent role in real time.
 - 🔁 **A debate that must terminate.** Writer and Reviewer iterate bounded
   rounds (`MAX_DEBATE_ROUNDS`); the Reviewer grades against a rubric and
   verifies citation support. Exhausted rounds escalate — guaranteed

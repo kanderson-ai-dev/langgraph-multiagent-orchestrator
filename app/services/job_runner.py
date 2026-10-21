@@ -163,9 +163,15 @@ class JobRunner:
         return {"configurable": {"thread_id": job_id}}
 
     async def _run(self, job_id: str, workspace_id: str, brief: Brief) -> None:
+        budget = (
+            brief.budget_usd
+            if brief.budget_usd is not None
+            else self._settings.default_job_budget_usd
+        )
         tracker = UsageTracker(
             job_id=job_id, workspace_id=workspace_id,
             store=self._usage, settings=self._settings,
+            budget_usd=budget,
         )
         started = time.monotonic()
         await self._jobs.update_status(workspace_id, job_id, "running")
@@ -174,11 +180,7 @@ class JobRunner:
                 state = initial_state(
                     job_id=job_id, workspace_id=workspace_id, brief=brief,
                     max_debate_rounds=self._settings.max_debate_rounds,
-                    budget_usd=(
-                        brief.budget_usd
-                        if brief.budget_usd is not None
-                        else self._settings.default_job_budget_usd
-                    ),
+                    budget_usd=budget,
                 )
                 with bind_trace(
                     name=f"job:{job_id}",
@@ -203,7 +205,12 @@ class JobRunner:
             logger.exception("job_failed", job_id=job_id)
             self._last_values.pop(job_id, None)
             self._trace_ids.pop(job_id, None)
-            await self._jobs.update_status(workspace_id, job_id, "failed")
+            from app.core.cost_tracking import BudgetExceededError
+
+            await self._jobs.update_status(
+                workspace_id, job_id,
+                "blocked" if isinstance(exc, BudgetExceededError) else "failed",
+            )
             await self._emit(
                 job_id,
                 {"node": "runner", "error": str(exc), "terminal": True},
@@ -217,9 +224,23 @@ class JobRunner:
         """Resume a paused job; ``base_cost`` re-seeds pre-pause spend so cost
         accounting and budget enforcement stay monotonic across resume."""
         base = await self._usage.job_cost(job_id)
+        # The checkpoint's budget_usd is authoritative — but it still holds
+        # the pre-pause cap: a "fund" top-up lands inside the human_review
+        # node, so mirror its formula here (uncapped + fund becomes capped).
+        resume_budget: float | None = None
+        try:
+            snap = await self._graph.aget_state(self._config(job_id))
+            resume_budget = snap.values.get("budget_usd") if snap else None
+        except Exception:
+            resume_budget = None
+        action = str(decision.get("action", "")) if isinstance(decision, dict) else ""
+        if action in ("fund", "fund_and_continue"):
+            extra = float(decision.get("additional_budget_usd", 0.0))
+            resume_budget = (resume_budget or 0.0) + max(extra, 0.0)
         tracker = UsageTracker(
             job_id=job_id, workspace_id=workspace_id,
             store=self._usage, settings=self._settings, base_cost=base,
+            budget_usd=resume_budget,
         )
         started = time.monotonic()
         try:

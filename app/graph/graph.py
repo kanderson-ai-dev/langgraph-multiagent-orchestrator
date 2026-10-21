@@ -58,7 +58,26 @@ def _as_node(worker: Worker) -> Any:
     """Adapt a ``Worker`` to a LangGraph node callable over TypedDict state."""
 
     async def node(state: OrchestrationState) -> dict[str, Any]:
-        return await worker.run(dict(state))
+        try:
+            return await worker.run(dict(state))
+        except Exception as exc:
+            # A pre-call budget refusal must escalate, never crash the job —
+            # the Supervisor converts `budget_blocked` into a human_review
+            # pause with the same reason the between-call gate uses.
+            from app.core.cost_tracking import BudgetExceededError
+
+            if not isinstance(exc, BudgetExceededError):
+                raise
+            return {
+                "budget_blocked": str(exc),
+                "transcript": [
+                    AgentMessage(
+                        sender=worker.name, recipient="supervisor",
+                        kind="system",
+                        content=f"LLM call refused by budget gate: {exc}",
+                    )
+                ],
+            }
 
     return _timed(worker.name, node)
 
@@ -188,10 +207,18 @@ def build_graph(
             }
         # Optional probabilistic second layer — only after the deterministic
         # regex pass, only on a real LLM (never the stub), tracked as a
-        # "guardrail"-role call. One paid call per *accepted* brief.
-        if settings.guardrail_llm_screen and await llm_screen_brief(
-            llm, brief_fields(brief)
-        ):
+        # "guardrail"-role call. One paid call per *accepted* brief. When the
+        # pre-call budget estimate refuses it, the optional screen degrades
+        # to "skipped" — the deterministic layer already ran.
+        screened = False
+        if settings.guardrail_llm_screen:
+            from app.core.cost_tracking import BudgetExceededError
+
+            try:
+                screened = await llm_screen_brief(llm, brief_fields(brief))
+            except BudgetExceededError:
+                screened = False
+        if screened:
             return {
                 "status": "blocked",
                 "transcript": [
@@ -220,9 +247,14 @@ def build_graph(
 
         # Cost governance: a spent budget stops all further paid work before
         # the decider itself burns tokens. An approved draft may still finish.
+        # `budget_blocked` arrives from a worker whose call was refused by
+        # the pre-call worst-case estimate — same escalation, same reason.
         budget = state.get("budget_usd")
+        refusal = state.get("budget_blocked") or ""
         over_budget = budget is not None and state.get("cost_so_far", 0.0) >= budget
-        if over_budget and not (verdict and verdict.verdict == "approve"):
+        if (over_budget or refusal) and not (
+            verdict and verdict.verdict == "approve"
+        ):
             from app.core.metrics import BUDGET_EXCEEDED_TOTAL
 
             BUDGET_EXCEEDED_TOTAL.inc()
@@ -295,8 +327,18 @@ def build_graph(
                     "transcript": [msg],
                 }
             team_registry = registry.view(active)
-            decision = await supervisor.decide(dict(state), registry=team_registry)
-            if decision.dispatches:
+            try:
+                decision = await supervisor.decide(
+                    dict(state), registry=team_registry
+                )
+            except Exception as exc:
+                from app.core.cost_tracking import BudgetExceededError
+
+                if not isinstance(exc, BudgetExceededError):
+                    raise
+                decision, nxt, reason = None, "human_review", "budget_exceeded"
+                refusal = str(exc)
+            if decision is not None and decision.dispatches:
                 # Dynamic fan-out: the supervisor chose parallel dispatches.
                 # Duplicate workers are fine in general (e.g. two researchers
                 # with different mandates), but the Reviewer is the debate's
@@ -336,9 +378,10 @@ def build_graph(
                         "supervisor": prompts.get("supervisor").version
                     }
                 return fanout_update
-            nxt = decision.next_worker
-            reason = decision.reason
-            decided_via_llm = using_llm_decider
+            if decision is not None:
+                nxt = decision.next_worker
+                reason = decision.reason
+                decided_via_llm = using_llm_decider
 
         target = FINISH if nxt == FINISH else nxt
         msg = AgentMessage(
@@ -390,6 +433,9 @@ def build_graph(
             update["status"] = "awaiting_review"
             esc_reason = "budget" if reason == "budget_exceeded" else "debate_rounds"
             update["escalation_reason"] = esc_reason
+            # Consume the refusal marker: a funded resume must not see the
+            # stale flag and re-escalate on its first supervisor pass.
+            update["budget_blocked"] = None
             update["allowed_actions"] = allowed_actions(
                 esc_reason, has_draft=bool(state.get("drafts"))
             )
@@ -399,6 +445,8 @@ def build_graph(
                     f"(cap ${state.get('budget_usd') or 0.0:.4f}) — approve the "
                     "current draft, or fund more budget to continue."
                 )
+                if refusal:
+                    content += f" Refused call: {refusal}."
             else:
                 content = (
                     "Debate budget exhausted without approval"

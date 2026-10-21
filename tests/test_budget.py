@@ -149,3 +149,195 @@ async def test_fund_resume_raises_budget_and_completes() -> None:
     assert resumed["status"] == "done"
     assert resumed["budget_usd"] == 0.50
     assert resumed["final_report"]
+
+
+# ─── Phase 9 — pre-call worst-case estimate ───────────────────────────────────
+
+
+def _tracker(settings: Settings, tmp_path: Any, budget: float | None) -> Any:
+    from app.core.cost_tracking import UsageTracker
+    from app.services.usage_store import UsageStore
+
+    return UsageTracker(
+        job_id="est", workspace_id="ws",
+        store=UsageStore(str(tmp_path / "u.sqlite")),
+        settings=settings, budget_usd=budget,
+    )
+
+
+def test_estimate_counts_tokens_retries_and_prices(tmp_path: Any) -> None:
+    """Worst-case = (prompt×in + max_completion×out) × (1 + retries)."""
+    from app.core.cost_tracking import estimate_call_cost
+
+    settings = _settings(llm_max_tokens=1000)
+    llm = _SpyLLM()
+    llm.max_retries = 2  # priced-model path also verifies retry factor
+    est = estimate_call_cost(
+        llm, model="gpt-4o-mini",
+        system="s " * 500, user="u " * 500, settings=settings,
+    )
+    in_p, out_p = 0.15, 0.60
+    attempt = est.prompt_tokens / 1e6 * in_p + 1000 / 1e6 * out_p
+    assert est.worst_case_usd == attempt * 3
+    assert est.max_completion_tokens == 1000
+
+
+def test_estimate_unknown_model_never_free(tmp_path: Any) -> None:
+    """An unpriced model falls back to configured prices — never $0."""
+    from app.core.cost_tracking import estimate_call_cost
+
+    settings = _settings(llm_max_tokens=500)
+    est = estimate_call_cost(
+        _SpyLLM(), model="totally-unknown-model",
+        system="sys", user="usr", settings=settings,
+    )
+    assert est.priced is False
+    assert est.worst_case_usd > 0
+
+
+async def test_precall_refusal_never_invokes_llm(tmp_path: Any) -> None:
+    """A call whose worst case exceeds the remaining budget is refused
+    BEFORE the provider is hit."""
+    import pytest
+
+    from app.core.cost_tracking import BudgetExceededError, bind_tracker
+
+    settings = _settings(llm_max_tokens=4096)
+    llm = _SpyLLM()
+    tracker = _tracker(settings, tmp_path, budget=1e-9)
+    async with bind_tracker(tracker):
+        with pytest.raises(BudgetExceededError):
+            from app.core.cost_tracking import tracked_structured
+
+            await tracked_structured(
+                llm, ResearchPlan, role="researcher",
+                model="stub", system="s " * 200, user="u " * 200,
+            )
+    assert llm.calls == 0
+
+
+async def test_uncapped_and_none_tracker_bypass_estimate(tmp_path: Any) -> None:
+    """``None`` budget = no cap → no pre-call accounting at all."""
+    from app.core.cost_tracking import bind_tracker, tracked_structured
+
+    settings = _settings()
+    llm = _SpyLLM()
+    async with bind_tracker(_tracker(settings, tmp_path, budget=None)):
+        out = await tracked_structured(
+            llm, ResearchPlan, role="researcher",
+            model="stub", system="s", user="u",
+        )
+    assert isinstance(out, ResearchPlan)
+    assert llm.calls == 1
+
+
+async def test_clamped_completion_fits_remaining_budget(tmp_path: Any) -> None:
+    """When the full completion cap won't fit but a smaller one does, the
+    call runs with a clamped ``max_completion_tokens`` instead of dying."""
+    from app.core.cost_tracking import (
+        MIN_VIABLE_COMPLETION_TOKENS,
+        bind_tracker,
+        tracked_structured,
+    )
+
+    settings = _settings(llm_max_tokens=4096)
+    llm = _SpyLLM()
+    ctx: dict[str, Any] = {}
+    # Fits ~1-2k completion tokens at default prices, not the 4096 cap.
+    tracker = _tracker(settings, tmp_path, budget=0.001)
+    async with bind_tracker(tracker):
+        out = await tracked_structured(
+            llm, ResearchPlan, role="researcher",
+            model="stub", system="s", user="u", context=ctx,
+        )
+    assert isinstance(out, ResearchPlan)
+    assert MIN_VIABLE_COMPLETION_TOKENS <= ctx["max_completion_tokens"] < 4096
+
+
+def test_estimate_never_underestimates_stub_cost(tmp_path: Any) -> None:
+    """The estimate must be ≥ what the stub ends up reporting — the
+    estimate is a ceiling, never an optimistic guess."""
+    from app.core.cost_tracking import estimate_call_cost
+
+    settings = _settings()
+    tracker = _tracker(settings, tmp_path, budget=None)
+    prompts = [
+        ("short", "u"),
+        ("s " * 5000, "u " * 3000),
+        ("emoji 😀🎉🚀 " * 200, "ok"),
+    ]
+    for system, user in prompts:
+        est = estimate_call_cost(
+            _SpyLLM(), model="stub",
+            system=system, user=user, settings=settings,
+        )
+        stub_prompt_tokens = (len(system) + len(user)) // 4
+        actual = tracker.compute_cost(stub_prompt_tokens, 800, model="stub")
+        assert est.worst_case_usd >= actual, (system[:20], est, actual)
+
+
+async def test_refused_call_escalates_to_human_review(tmp_path: Any) -> None:
+    """Graph-level: a worker whose call is refused produces the same
+    ``awaiting_review``/``budget`` escalation as the between-call gate —
+    never an exception, never silent overspend."""
+    from app.core.cost_tracking import bind_tracker
+
+    settings = _settings(database_path=str(tmp_path / "u.sqlite"))
+    llm, search = _SpyLLM(), _SpySearch()
+    g = _graph(settings, llm, search)
+    tracker = _tracker(settings, tmp_path, budget=1e-9)
+    async with bind_tracker(tracker):
+        out = await g.ainvoke(
+            _state(settings, budget=1e-9),
+            config={"configurable": {"thread_id": "precall"}},
+        )
+    assert out["status"] == "awaiting_review"
+    assert out["escalation_reason"] == "budget"
+    assert llm.calls == 0
+
+
+async def test_zero_budget_on_tracker_refuses_everything(tmp_path: Any) -> None:
+    """budget=0 on the tracker = zero cap → every paid call refused."""
+    import pytest
+
+    from app.core.cost_tracking import (
+        BudgetExceededError,
+        bind_tracker,
+        tracked_structured,
+    )
+
+    settings = _settings()
+    async with bind_tracker(_tracker(settings, tmp_path, budget=0.0)):
+        with pytest.raises(BudgetExceededError):
+            await tracked_structured(
+                _SpyLLM(), ResearchPlan, role="researcher",
+                model="stub", system="s", user="u",
+            )
+
+
+async def test_refusal_flag_cleared_after_funded_resume(tmp_path: Any) -> None:
+    """``budget_blocked`` must not persist through the pause — a funded
+    resume would otherwise re-escalate on the stale flag forever."""
+    from app.core.cost_tracking import bind_tracker
+
+    settings = _settings(database_path=str(tmp_path / "u.sqlite"))
+    llm, search = _SpyLLM(), _SpySearch()
+    g = _graph(settings, llm, search)
+    cfg = {"configurable": {"thread_id": "flag"}}
+    async with bind_tracker(_tracker(settings, tmp_path, budget=1e-9)):
+        out = await g.ainvoke(_state(settings, budget=1e-9), config=cfg)
+    assert out["status"] == "awaiting_review"
+    assert out["escalation_reason"] == "budget"
+    # The refusal text is in the transcript; the flag itself is already
+    # consumed by the supervisor so it can't re-trigger after resume.
+    assert any(
+        "refused" in m.content.lower() for m in out["transcript"]
+    )
+
+    async with bind_tracker(_tracker(settings, tmp_path, budget=1.0)):
+        resumed = await g.ainvoke(
+            Command(resume={"action": "fund", "additional_budget_usd": 1.0}),
+            config=cfg,
+        )
+    assert resumed["status"] == "done"
+    assert not resumed.get("budget_blocked")

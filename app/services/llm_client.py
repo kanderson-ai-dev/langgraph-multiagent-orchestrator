@@ -36,6 +36,10 @@ class StructuredLLM(Protocol):
 class OpenAIStructuredLLM:
     """``StructuredLLM`` backed by langchain-openai structured output."""
 
+    # Provider-side retries — each one re-bills a full attempt, so the
+    # pre-call worst-case estimate multiplies by (1 + max_retries).
+    max_retries = 6
+
     def __init__(self, settings: Settings, *, model: str | None = None) -> None:
         from langchain_openai import ChatOpenAI
 
@@ -47,7 +51,7 @@ class OpenAIStructuredLLM:
             api_key=settings.openai_api_key,
             # Transient 429/5xx retry with exponential backoff — parallel jobs
             # can briefly saturate the org TPM limit mid-run.
-            max_retries=6,
+            max_retries=self.max_retries,
         )
         # Bounded outputs: schemas already cap completion size; the setting
         # is an extra seatbelt when configured (None = provider default).
@@ -66,6 +70,12 @@ class OpenAIStructuredLLM:
         # the provider's real token counts, which tracked_structured
         # prefers over the chars/4 estimate.
         runnable = self._model.with_structured_output(schema, include_raw=True)
+        # Pre-call budget clamp: when the worst-case estimate couldn't fit
+        # the configured cap but a smaller completion does, cost tracking
+        # passes the affordable ceiling through context.
+        max_out = context.pop("max_completion_tokens", None) if context else None
+        if max_out:
+            runnable = runnable.bind(max_tokens=int(max_out))
         # Prompt provenance rides on the run config: LangSmith shows it as
         # run metadata + a `prompt:<name>@v<N>` tag when tracing is enabled;
         # it is inert otherwise (no behavior change offline).
@@ -109,6 +119,7 @@ class StubLLM:
 
     model_name = "stub"  # not a priced model — UsageTracker falls back to
     # the configurable COST_*_PRICE_PER_1M settings for stub calls.
+    max_retries = 0  # deterministic — never retries, so attempts = 1
 
     def __init__(self, builders: dict[str, StubBuilder] | None = None) -> None:
         self._builders = builders or {}

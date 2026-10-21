@@ -7,16 +7,21 @@ each see their own binding.
 """
 
 import contextvars
+import math
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
 
 from app.core.config import Settings
+from app.core.logging import get_logger
 from app.core.metrics import LLM_CALLS_TOTAL, LLM_COST_USD, LLM_TOKENS_TOTAL
 from app.services.usage_store import UsageStore
+
+logger = get_logger(__name__)
 
 _current: contextvars.ContextVar["UsageTracker | None"] = contextvars.ContextVar(
     "usage_tracker", default=None
@@ -48,6 +53,121 @@ def price_for(model: str) -> tuple[float, float] | None:
     return None
 
 
+# ─── pre-call worst-case estimation ──────────────────────────────────────────
+# The between-call gate only sees *accrued* cost, so a single in-flight call
+# could overrun the cap by its own size. Before every metered call we compute
+# the worst case — prompt tokens (tiktoken, never below the chars/4 stub
+# convention) + the configured max completion tokens, priced per-1M, times
+# (1 + max_retries) since a retry re-bills the full attempt — and refuse when
+# it cannot fit the remaining budget. When a smaller completion budget still
+# fits, the call runs with ``max_completion_tokens`` clamped instead.
+DEFAULT_MAX_COMPLETION_TOKENS = 4096
+MIN_VIABLE_COMPLETION_TOKENS = 256
+
+
+class BudgetExceededError(RuntimeError):
+    """Refusal: this call's worst-case estimate cannot fit the budget."""
+
+    def __init__(
+        self,
+        *,
+        role: str,
+        estimated_usd: float,
+        remaining_usd: float,
+        budget_usd: float,
+    ) -> None:
+        self.role = role
+        self.estimated_usd = estimated_usd
+        self.remaining_usd = remaining_usd
+        self.budget_usd = budget_usd
+        super().__init__(
+            f"{role} call refused: worst-case ${estimated_usd:.6f} exceeds "
+            f"remaining budget ${remaining_usd:.6f} (cap ${budget_usd:.4f})"
+        )
+
+
+@dataclass(frozen=True)
+class CallEstimate:
+    prompt_tokens: int
+    max_completion_tokens: int
+    attempts: int  # 1 + max_retries — every retry re-bills a full attempt
+    input_price_per_1m: float
+    output_price_per_1m: float
+    worst_case_usd: float
+    priced: bool  # False → model unpriced; configured defaults were used
+
+
+def _count_tokens(system: str, user: str, model: str | None) -> int:
+    """Prompt token count — tiktoken when available, but never below the
+    chars/4 convention the stub reports (the estimate must stay a ceiling)."""
+    chars4 = (len(system) + len(user)) // 4
+    counted = 0
+    try:
+        import tiktoken
+
+        try:
+            enc = tiktoken.encoding_for_model(model or "gpt-4o-mini")
+        except (KeyError, ValueError):
+            enc = tiktoken.get_encoding("cl100k_base")
+        counted = len(enc.encode(system)) + len(enc.encode(user))
+    except Exception:
+        counted = 0
+    return max(counted, chars4)
+
+
+def estimate_call_cost(
+    llm: Any,
+    *,
+    model: str,
+    system: str,
+    user: str,
+    settings: Settings,
+) -> CallEstimate:
+    """Worst-case USD for one metered call.
+
+    ``(prompt × input_price + max_completion × output_price) × attempts``;
+    ``attempts`` = ``1 + llm.max_retries`` because a provider retry re-bills
+    the full request. Unpriced models use the configured default prices —
+    an estimate is never "free".
+    """
+    prompt_tokens = _count_tokens(system, user, model or None)
+    max_completion = settings.llm_max_tokens or DEFAULT_MAX_COMPLETION_TOKENS
+    prices = price_for(model)
+    priced = prices is not None
+    if prices is None:
+        prices = (
+            settings.cost_input_price_per_1m,
+            settings.cost_output_price_per_1m,
+        )
+        logger.warning(
+            "llm_cost_estimate_unpriced_model",
+            model=model or "unknown",
+            note="falling back to configured COST_*_PRICE_PER_1M defaults",
+        )
+    in_p, out_p = prices
+    attempts = 1 + int(getattr(llm, "max_retries", 0) or 0)
+    attempt = prompt_tokens / 1e6 * in_p + max_completion / 1e6 * out_p
+    return CallEstimate(
+        prompt_tokens=prompt_tokens,
+        max_completion_tokens=max_completion,
+        attempts=attempts,
+        input_price_per_1m=in_p,
+        output_price_per_1m=out_p,
+        worst_case_usd=attempt * attempts,
+        priced=priced,
+    )
+
+
+def _affordable_completion_tokens(est: CallEstimate, remaining: float) -> int:
+    """Largest completion budget whose *full* worst case still fits
+    ``remaining`` — negative when even a zero-output attempt can't."""
+    if est.output_price_per_1m <= 0:
+        return est.max_completion_tokens
+    per_attempt = remaining / est.attempts
+    headroom = per_attempt * 1e6 - est.prompt_tokens * est.input_price_per_1m
+    return math.floor(headroom / est.output_price_per_1m)
+
+
 class UsageRecord(BaseModel):
     role: str
     model: str
@@ -71,6 +191,7 @@ class UsageTracker:
         store: UsageStore,
         settings: Settings,
         base_cost: float = 0.0,
+        budget_usd: float | None = None,
     ) -> None:
         self.job_id = job_id
         self.workspace_id = workspace_id
@@ -78,6 +199,9 @@ class UsageTracker:
         self._settings = settings
         # Cost recorded before a HITL resume — keeps totals monotonic.
         self._base_cost = base_cost
+        # Hard LLM-spend cap for the pre-call worst-case check; None = no
+        # cap, 0 = zero cap (every paid call refused).
+        self.budget_usd = budget_usd
         self.records: list[UsageRecord] = []
 
     def compute_cost(
@@ -190,6 +314,34 @@ async def tracked_structured(
     (chars/4) — estimates are never presented as provider data.
     """
     model = model or str(getattr(llm, "model_name", "") or "")
+    # Pre-call worst-case check: refuse calls that provably cannot fit the
+    # remaining budget — the between-call gate only sees *accrued* cost.
+    tracker = _current.get()
+    if tracker is not None and tracker.budget_usd is not None:
+        est = estimate_call_cost(
+            llm, model=model, system=system, user=user,
+            settings=tracker._settings,
+        )
+        remaining = tracker.budget_usd - tracker.total_cost
+        if est.worst_case_usd > remaining:
+            affordable = _affordable_completion_tokens(est, remaining)
+            if affordable >= MIN_VIABLE_COMPLETION_TOKENS:
+                context = context if context is not None else {}
+                context["max_completion_tokens"] = min(
+                    est.max_completion_tokens, affordable
+                )
+                logger.info(
+                    "llm_completion_budget_clamped",
+                    role=role, model=model,
+                    max_completion_tokens=context["max_completion_tokens"],
+                )
+            else:
+                raise BudgetExceededError(
+                    role=role,
+                    estimated_usd=est.worst_case_usd,
+                    remaining_usd=remaining,
+                    budget_usd=tracker.budget_usd,
+                )
     started = time.monotonic()
     result = await llm.structured(schema, system=system, user=user, context=context)
     ctx = context or {}

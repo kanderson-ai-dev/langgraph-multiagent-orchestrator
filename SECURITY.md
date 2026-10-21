@@ -96,7 +96,10 @@ real scraped HTML and LLM payloads. Before a cassette is committed:
   claims are dropped and counted.
 - **LLM06 Excessive Agency** — the Supervisor's dispatch budget
   (`max_dispatches`) and the debate bound (`max_debate_rounds`) make
-  termination structural; HITL escalation on exhaustion.
+  termination structural; HITL escalation on exhaustion. The spend cap is
+  enforced pre-dispatch (accrued cost) **and** pre-call (worst-case
+  estimate: tokens × price × `1 + max_retries`; refusal escalates, a
+  smaller affordable completion clamps `max_completion_tokens`).
 - **LLM07 System Prompt Leakage** — output screening; secrets never
   interpolated into prompts.
 - **LLM09 Misinformation** — citation verification + human review on

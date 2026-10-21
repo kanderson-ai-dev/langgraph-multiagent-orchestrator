@@ -156,6 +156,10 @@ class OrchestrationState(TypedDict, total=False):
     pending_sends: list[dict[str, str]]  # transient: fan-out dispatches
     cost_so_far: Annotated[float, keep_max]
     budget_usd: float | None  # hard LLM-spend cap; None = unlimited
+    # Set by a worker whose LLM call was refused by the pre-call worst-case
+    # estimate — the Supervisor escalates instead of dispatching further,
+    # then clears it so a funded resume doesn't re-escalate forever.
+    budget_blocked: str | None
     escalation_reason: str | None  # "debate_rounds" | "budget"
     # HITL: actions legal for this pause (per hitl.allowed_actions) and the
     # operator's stated reason when a job is rejected.
