@@ -39,9 +39,12 @@ async function verify() {
   try {
     const a = await api(`/orchestration/reports/${jobId}/audit`);
     const sig = a.signature_valid === true ? " · signed ✓"
-      : a.signature_valid === false ? " · signature ✗" : "";
-    badge.textContent = (a.valid ? "chain ✓ valid" : "chain ✗ INVALID") + sig;
-    badge.className = "chip chip-mono " + (a.valid && a.signature_valid !== false ? "chip-ok" : "chip-bad");
+      : a.signature_valid === false ? " · signature ✗" : " · unsigned";
+    const anchor = a.anchor_match === true ? " · anchor ✓"
+      : a.anchor_match === false ? " · anchor ✗" : "";
+    const bad = !a.valid || a.signature_valid === false || a.anchor_match === false;
+    badge.textContent = (a.valid ? "chain ✓ valid" : "chain ✗ INVALID") + sig + anchor;
+    badge.className = "chip chip-mono " + (bad ? "chip-bad" : "chip-ok");
     root.innerHTML = `
       <div class="perf-grid">
         <div class="stat"><span class="stat-label">Entries</span><span class="stat-value">${(a.entries || []).length}</span></div>

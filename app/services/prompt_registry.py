@@ -29,6 +29,7 @@ import json
 import sqlite3
 import string
 import threading
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -152,10 +153,20 @@ class PromptRegistry:
         promoted_overrides: dict[str, int] | None = None,
         yaml_versions: dict[tuple[str, int], PromptVersion] | None = None,
         signing_key: str | None = None,
+        previous_keys: Sequence[str] = (),
     ) -> None:
         self._versions = versions
         self._conn = conn
         self._signing_key = signing_key
+        # Verification keyring {key_id: key}: current key first, then
+        # retired keys — signatures minted pre-rotation stay verifiable.
+        from app.services.audit import key_id_for
+
+        self._keyring: dict[str, str] = {}
+        if signing_key:
+            self._keyring[key_id_for(signing_key)] = signing_key
+        for key in previous_keys:
+            self._keyring.setdefault(key_id_for(key), key)
         self._lock = threading.Lock()
         self._promoted_overrides = dict(promoted_overrides or {})
         # Pristine YAML seeds kept for cross-process refreshes: a second
@@ -172,6 +183,7 @@ class PromptRegistry:
         prompts_dir: Path | str = DEFAULT_PROMPTS_DIR,
         db_path: str | None = None,
         signing_key: str | None = None,
+        previous_keys: Sequence[str] = (),
     ) -> PromptRegistry:
         """Load YAML seeds (+ SQLite overlay when ``db_path`` is given).
 
@@ -192,7 +204,11 @@ class PromptRegistry:
 
         cls._validate(versions)
         return cls(
-            versions, conn, yaml_versions=yaml_versions, signing_key=signing_key
+            versions,
+            conn,
+            yaml_versions=yaml_versions,
+            signing_key=signing_key,
+            previous_keys=previous_keys,
         )
 
     @staticmethod
@@ -511,14 +527,18 @@ class PromptRegistry:
         self._persist(pv, status_overridden=True)
 
     def _sign(self, digest: str) -> str:
-        """HMAC over an event hash when the deployment holds a key."""
+        """``key_id:HMAC`` over an event hash when a key is configured —
+        the id lets verification pick the right key after a rotation."""
         if not self._signing_key:
             return ""
         import hmac
 
-        return hmac.new(
+        from app.services.audit import key_id_for
+
+        mac = hmac.new(
             self._signing_key.encode(), digest.encode(), hashlib.sha256
         ).hexdigest()
+        return f"{key_id_for(self._signing_key)}:{mac}"
 
     def _record_event(
         self,
@@ -682,10 +702,24 @@ class PromptRegistry:
                 valid = False
             stored_sig = str(row.get("sig") or "")
             sig_valid: bool | None = None
-            if self._signing_key and stored_sig:
+            if self._keyring and stored_sig:
                 import hmac
 
-                sig_valid = hmac.compare_digest(stored_sig, self._sign(digest))
+                kid, sep, sig = stored_sig.partition(":")
+                if sep:
+                    key = self._keyring.get(kid)
+                    keys = [key] if key is not None else []
+                else:
+                    keys = list(self._keyring.values())
+                sig_valid = any(
+                    hmac.compare_digest(
+                        sig,
+                        hmac.new(
+                            k.encode(), digest.encode(), hashlib.sha256
+                        ).hexdigest(),
+                    )
+                    for k in keys
+                )
             entries.append(
                 {**row, "recomputed_hash": digest,
                  "signature_valid": sig_valid}

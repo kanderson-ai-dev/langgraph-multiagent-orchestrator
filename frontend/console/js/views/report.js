@@ -48,12 +48,14 @@ export async function renderReport(result, jobId) {
     const a = await api(`/orchestration/reports/${jobId}/audit`);
     const badge = $("#audit-badge");
     const sig = a.signature_valid === true ? " signed"
-      : a.signature_valid === false ? " ✗signature" : "";
+      : a.signature_valid === false ? " ✗signature" : " unsigned";
+    const anchor = a.anchor_match === true ? " · anchored"
+      : a.anchor_match === false ? " · anchor ✗" : "";
+    const bad = !a.valid || a.signature_valid === false || a.anchor_match === false;
     badge.textContent = a.valid
-      ? `audit ✓ ${String(a.audit_root).slice(0, 12)}…${sig}`
+      ? `audit ✓ ${String(a.audit_root).slice(0, 12)}…${sig}${anchor}`
       : "audit ✗ INVALID";
-    badge.style.color = a.valid && a.signature_valid !== false
-      ? "var(--ok)" : "var(--danger)";
+    badge.style.color = bad ? "var(--danger)" : "var(--ok)";
     badge.classList.remove("hidden");
   } catch { /* audit is best-effort */ }
 }

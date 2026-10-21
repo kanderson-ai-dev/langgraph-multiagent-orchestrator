@@ -101,6 +101,11 @@ def build_runner(
     cache = CacheStore(settings.database_path) if settings.cache_enabled else None
     search = build_search_client(settings, cache=cache)
     scraper = ScraperClient(settings, cache=cache)
+    prev_raw = (
+        settings.audit_signing_previous_keys.get_secret_value()
+        if settings.audit_signing_previous_keys
+        else ""
+    )
     prompts = PromptRegistry.load(
         DEFAULT_PROMPTS_DIR,
         db_path=settings.database_path,
@@ -109,6 +114,7 @@ def build_runner(
             if settings.audit_signing_key
             else None
         ),
+        previous_keys=[k.strip() for k in prev_raw.split(",") if k.strip()],
     )
     graph = build_graph(
         settings, llm=llm, search=search, scraper=scraper,

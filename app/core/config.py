@@ -125,6 +125,14 @@ class Settings(BaseSettings):
     # a DB-only attacker cannot recompute a forged-but-consistent chain.
     # Unset → roots are hash-only and the API reports "signed": false.
     audit_signing_key: SecretStr | None = None
+    # Retired signing keys kept for verification after a rotation —
+    # comma-separated, never used to sign. Each stored signature carries
+    # the key id it was minted with.
+    audit_signing_previous_keys: SecretStr | None = None
+    # Append-only anchor log: one JSONL line per sealed job binding
+    # job_id → audit_root, independent of the jobs DB (copy off-box to
+    # make rewrites detectable).
+    audit_anchor_path: str = "data/audit_anchor.jsonl"
 
     # Optional second-layer input screening: a strict yes/no model call for
     # briefs that pass the regex layer. Probabilistic, costs one call per
@@ -174,6 +182,7 @@ class Settings(BaseSettings):
         "jwt_secret_key",
         "admin_password_hash",
         "audit_signing_key",
+        "audit_signing_previous_keys",
         "redis_url",
         mode="before",
     )

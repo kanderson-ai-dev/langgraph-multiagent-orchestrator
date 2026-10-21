@@ -59,6 +59,18 @@ def test_no_code_path_persists_token_to_localstorage() -> None:
     assert "auth-remember" not in console_html
 
 
+def test_audit_badges_label_unsigned_jobs() -> None:
+    """Pin the audit badge contract: an un-signed deployment must render
+    an explicit "unsigned" label — never silently omit the signature
+    state — and a failed anchor check must turn the badge red."""
+    audit_js = (_FRONTEND / "views" / "audit.js").read_text(encoding="utf-8")
+    assert '" · unsigned"' in audit_js
+    assert "anchor_match === false" in audit_js
+    report_js = (_FRONTEND / "views" / "report.js").read_text(encoding="utf-8")
+    assert '" unsigned"' in report_js
+    assert "anchor_match === false" in report_js
+
+
 def test_api_routes_not_shadowed() -> None:
     """API and health routes must resolve even with a `/` route mounted."""
     client = _client()

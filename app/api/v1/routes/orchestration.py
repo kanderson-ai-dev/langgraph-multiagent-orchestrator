@@ -311,13 +311,24 @@ def _report_md(job: Any) -> str:
 
 
 def _report_footer(job: Any) -> str:
+    parts: list[str] = []
     raw = job.result.get("prompt_versions")
-    if not isinstance(raw, dict) or not raw:
-        return ""
-    rendered = " · ".join(
-        f"{n.replace('_', ' ').title()} v{v}" for n, v in sorted(raw.items())
-    )
-    return f"Prompt versions: {rendered}"
+    if isinstance(raw, dict) and raw:
+        rendered = " · ".join(
+            f"{n.replace('_', ' ').title()} v{v}"
+            for n, v in sorted(raw.items())
+        )
+        parts.append(f"Prompt versions: {rendered}")
+    if job.result.get("audit_root"):
+        sig = job.result.get("audit_signature")
+        if isinstance(sig, str) and sig:
+            from app.services.audit import signature_key_id
+
+            kid = signature_key_id(sig)
+            parts.append(f"Audit: signed{f' (key {kid})' if kid else ''}")
+        else:
+            parts.append("Audit: unsigned")
+    return " — ".join(parts)
 
 
 @router.get("/reports/{job_id}/report.md")
@@ -391,9 +402,12 @@ async def audit_trail(
     from app.services.audit import (
         GENESIS,
         chain_transcript,
+        signature_key_id,
+        signing_keyring,
         verify_chain,
         verify_signature,
     )
+    from app.services.audit_anchor import check_anchor
 
     raw = job.result["transcript"]
     if not isinstance(raw, list):
@@ -403,9 +417,10 @@ async def audit_trail(
     stored_root = str(job.result.get("audit_root") or GENESIS)
     signature = job.result.get("audit_signature")
     signature_valid: bool | None = None
-    if settings.audit_signing_key and isinstance(signature, str) and signature:
+    keyring = signing_keyring(settings)
+    if keyring and isinstance(signature, str) and signature:
         signature_valid = verify_signature(
-            settings.audit_signing_key.get_secret_value(),
+            keyring,
             signature,
             stored_root,
             job_id=job.job_id,
@@ -417,6 +432,14 @@ async def audit_trail(
         "valid": verify_chain(messages, stored_root),
         "signed": signature_valid is not None,
         "signature_valid": signature_valid,
+        "signature_key_id": signature_key_id(
+            signature if isinstance(signature, str) else None
+        ),
+        "anchor_match": check_anchor(
+            settings.audit_anchor_path,
+            job_id=job.job_id,
+            audit_root=stored_root,
+        ),
         "entries": [e.model_dump() for e in entries],
         "evidence_root": job.result.get("evidence_root"),
         "evidence_manifest": job.result.get("evidence_manifest"),
