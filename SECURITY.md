@@ -133,8 +133,9 @@ real scraped HTML and LLM payloads. Before a cassette is committed:
   `HTTP(S)_PROXY` variable would otherwise route DNS+connect through a
   proxy and bypass the guard.
 - robots.txt: 4xx → allow (RFC 9309); 5xx/timeouts →
-  `SCRAPE_ROBOTS_FAIL_POLICY` (`allow` default for politeness, `deny`
-  for strict deployments).
+  `SCRAPE_ROBOTS_FAIL_POLICY` (`deny` default — RFC 9309 §2.3.1.5 lets a
+  crawler treat unreachable robots as disallow; `allow` is a permissive
+  opt-in).
 - Audit signatures authenticate the chain tip against **DB-only** attackers.
   An attacker who also steals `AUDIT_SIGNING_KEY` can forge signatures — the
   key must live outside the DB (env/secret manager). There is no key

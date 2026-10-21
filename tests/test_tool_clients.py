@@ -401,13 +401,24 @@ async def test_robots_4xx_allows_fetch(monkeypatch: Any) -> None:
 
 
 @respx.mock
-async def test_robots_5xx_default_policy_allows(monkeypatch: Any) -> None:
+async def test_robots_5xx_default_policy_denies(monkeypatch: Any) -> None:
+    _dns(monkeypatch, [_PUBLIC_IP])
+    respx.get("https://ok.test/robots.txt").mock(
+        return_value=httpx.Response(503)
+    )
+    s = ScraperClient(_robots_settings())  # default policy: deny (RFC 9309)
+    with pytest.raises(ScrapeError, match="robots"):
+        await s.scrape("https://ok.test/p")
+
+
+@respx.mock
+async def test_robots_5xx_allow_policy_still_fetches(monkeypatch: Any) -> None:
     _dns(monkeypatch, [_PUBLIC_IP])
     respx.get("https://ok.test/robots.txt").mock(
         return_value=httpx.Response(503)
     )
     respx.get("https://ok.test/p").mock(return_value=httpx.Response(200))
-    s = ScraperClient(_robots_settings())  # default policy: allow
+    s = ScraperClient(_robots_settings(scrape_robots_fail_policy="allow"))
     assert (await s.scrape("https://ok.test/p")).status_code == 200
 
 
@@ -431,6 +442,17 @@ async def test_robots_timeout_obeys_deny_policy(monkeypatch: Any) -> None:
     s = ScraperClient(_robots_settings(scrape_robots_fail_policy="deny"))
     with pytest.raises(ScrapeError, match="robots"):
         await s.scrape("https://ok.test/p")
+
+
+@respx.mock
+async def test_robots_timeout_obeys_allow_policy(monkeypatch: Any) -> None:
+    _dns(monkeypatch, [_PUBLIC_IP])
+    respx.get("https://ok.test/robots.txt").mock(
+        side_effect=httpx.ConnectTimeout("boom")
+    )
+    respx.get("https://ok.test/p").mock(return_value=httpx.Response(200))
+    s = ScraperClient(_robots_settings(scrape_robots_fail_policy="allow"))
+    assert (await s.scrape("https://ok.test/p")).status_code == 200
 
 
 # ─── Document parser ─────────────────────────────────────────────────────────

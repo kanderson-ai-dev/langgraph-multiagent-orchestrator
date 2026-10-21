@@ -59,10 +59,11 @@ class Settings(BaseSettings):
     scrape_max_bytes: int = Field(default=1_048_576, gt=0)
     scrape_respect_robots: bool = True
     # Policy when robots.txt is unreadable for reasons other than a 4xx
-    # (5xx, timeout, transport error): RFC 9309 treats unreachable robots
-    # as "allow" while server errors may be treated as disallow. "allow"
-    # keeps the polite-but-permissive default; "deny" is the strict mode.
-    scrape_robots_fail_policy: Literal["allow", "deny"] = "allow"
+    # (5xx, timeout, transport error): RFC 9309 §2.3.1.5 lets a crawler
+    # treat a 5xx robots response as *disallow*, while a 4xx means "no
+    # robots.txt" → allow. "deny" is the RFC-strict default; "allow" is
+    # the permissive opt-in.
+    scrape_robots_fail_policy: Literal["allow", "deny"] = "deny"
     # Max redirect hops followed per fetch — every hop's destination is
     # re-validated (scheme + DNS-resolved address) before connecting.
     scrape_max_redirects: int = Field(default=3, ge=0, le=10)
