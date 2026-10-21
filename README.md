@@ -504,7 +504,8 @@ named volume; `.env` is read at runtime — no secrets are baked in.
 | `REVIEWER_MODEL` / `LLM_MAX_TOKENS` | no | — | Model override per role / output cap per call |
 | `RESEARCH_SCRAPE_TOP_K` | no | — | Sources scraped per sub-question |
 | `REVIEW_EARLY_EXIT_SCORE` / `REVIEWER_CITATION_SHORTCIRCUIT` | no | — | Skip/defer review work when deterministically decidable |
-| `CACHE_ENABLED` / `CACHE_TTL_HOURS` | no | — | Search/scrape response cache (SQLite, per workspace+day) |
+| `CACHE_ENABLED` / `CACHE_TTL_HOURS` | no | — | Search/scrape response cache (per workspace+day) |
+| `STORAGE_BACKEND` / `DATABASE_URL` | no | `sqlite` | `postgres` swaps all six stores to a shared asyncpg pool (schemas auto-migrate; `docker-compose.postgres.yml` for the optional stack) |
 | `REDIS_URL` | no | — | Enables Redis-backed rate limiter + event bus (multi-replica) |
 | `RATE_LIMIT_PER_MINUTE` | no | — | Sliding-window request cap per workspace |
 | `GUARDRAIL_LLM_SCREEN` | no | — | Optional model-based 2nd brief screen (one cheap `guardrail` call per accepted brief; never on the offline stub; fails open) |
@@ -606,9 +607,12 @@ Both backends pass the same parametrized contract test suite — CI uses
 re-reads its SQLite overlay whenever the lifecycle chain grows (a promote
 in one process is visible in another sharing the file — single host only),
 A/B run records persist in `prompt_ab_runs` so they survive restarts, and
-the runner frees per-job dicts at terminal states. Remaining scale-out
-step: a `JobStore` protocol with a Postgres implementation (SQLite today
-is single-node).
+the runner frees per-job dicts at terminal states. For true multi-replica
+state, `STORAGE_BACKEND=postgres` + `DATABASE_URL` swaps all six stores
+to a shared `asyncpg` pool (`app/services/pg/`); the same contract suite
+runs against both backends, and the LangGraph checkpointer stays on its
+own path (`CHECKPOINT_DB_PATH`) either way — a Postgres saver is the
+documented next step.
 
 ## Known limitations & next steps
 
@@ -626,10 +630,13 @@ is single-node).
   Writer↔Reviewer debate itself — sequential by design — plus keyless
   search latency; a paid provider (Tavily) would shave the research phase
   further.
-- The SQLite stores run WAL + a 5 s busy timeout (concurrency-tested —
-  see ADR 0003) but remain single-node, single-writer; the next step is
-  a `JobStore` protocol + Postgres implementation for true multi-replica
-  state (the rate limiter and event bus already have Redis backends).
+- The default SQLite stores run WAL + a 5 s busy timeout
+  (concurrency-tested — see ADR 0003) but remain single-node,
+  single-writer. `STORAGE_BACKEND=postgres` switches all six stores to
+  Postgres for multi-replica deployments (optional
+  `docker-compose.postgres.yml`; contract-tested in CI); the LangGraph
+  checkpointer is still SQLite-only either way — resume state stays
+  single-host until it moves to a Postgres saver.
 - LLM-as-judge and live experiments require live credentials; the
   offline scorecard intentionally validates the deterministic pipeline
   (ADR 0004).

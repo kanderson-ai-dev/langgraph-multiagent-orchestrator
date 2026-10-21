@@ -54,3 +54,31 @@ the explicit next step.**
   the `ab_runs` hot cache (100 entries / 1 h — the DB row is the truth),
   and in-memory rate limiting (use `REDIS_URL`). Job rows themselves stay
   single-writer — Postgres remains the real multi-node step.
+
+## Amendment (2026-10): Postgres backend landed
+
+The "next step" is now implemented, not just documented:
+
+- `STORAGE_BACKEND=postgres` + `DATABASE_URL` selects
+  `app/services/pg/stores.py` — all six stores (jobs, usage, workspaces,
+  feedback, revoked tokens, fetch cache) over one lazy `asyncpg` pool.
+  Same semantics as SQLite: tenant-scoped reads, JSONB payloads, ISO-text
+  timestamps, schema auto-migration on first use
+  (`scripts/pg_migrate.py --check` verifies a pre-provisioned schema for
+  least-privilege roles).
+- `STORAGE_BACKEND` defaults to `sqlite`; the setting lives in
+  `app/core/config.py` and the factory in `store_factory.py` raises on
+  unknown values or a missing DSN — no silent fallback.
+- `app/services/store_protocols.py` types the consumer seam
+  (`JobStoreProtocol`, `UsageStoreProtocol`, `WorkspaceStoreProtocol`,
+  `FeedbackStoreProtocol`, `CacheStoreProtocol`; `TokenStore` was already
+  a protocol). `tests/test_store_contract.py` runs the same behavioral
+  contract against both backends — Postgres joins the matrix only when
+  `TEST_DATABASE_URL` is set (CI runs it in a service container).
+- Not yet on Postgres: the LangGraph checkpointer still uses
+  `checkpoint_db_path` (SQLite `AsyncSqliteSaver`); upstream ships a
+  `langgraph-checkpoint-postgres` saver as the documented next step —
+  resume-after-crash still works, it just shares the SQLite single-host
+  caveat. `scripts/audit_anchor.py --check` also reads the jobs table
+  with `sqlite3` directly (anchor-vs-API checks via `anchor_match` work
+  on either backend).
