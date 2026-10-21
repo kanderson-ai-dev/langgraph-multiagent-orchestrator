@@ -22,6 +22,7 @@ import sqlite3
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import aiosqlite
@@ -37,6 +38,25 @@ _PRAGMAS_TAIL = (
 )
 
 
+def _ensure_parent(path: str) -> None:
+    """Create the database file's parent directory when there is one.
+
+    Skipped for ``:memory:`` and ``file:`` URIs — the parent of a URI is
+    not a filesystem directory. Every store goes through this helper, so
+    a bare checkout without ``data/`` works without each caller mkdir-ing
+    itself. Failure raises a readable error naming the database path,
+    not a bare ``unable to open database file``.
+    """
+    if path == ":memory:" or path.startswith("file:"):
+        return
+    try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise OSError(
+            f"cannot create parent directory for SQLite database {path!r}: {exc}"
+        ) from exc
+
+
 async def _apply_pragmas(db: Any) -> None:
     await db.execute("PRAGMA busy_timeout=5000")
     cur = await db.execute("PRAGMA journal_mode")
@@ -50,6 +70,7 @@ async def open_connection(path: str) -> aiosqlite.Connection:
 
     The caller owns the returned connection and must close it.
     """
+    _ensure_parent(path)
     db = await aiosqlite.connect(path)
     for attempt in range(6):
         try:
@@ -73,6 +94,7 @@ def _apply_pragmas_sync(conn: sqlite3.Connection) -> None:
 @asynccontextmanager
 async def connect(path: str) -> AsyncIterator[aiosqlite.Connection]:
     """Context-managed variant of :func:`open_connection` (auto-close)."""
+    _ensure_parent(path)
     db = await open_connection(path)
     try:
         yield db
@@ -82,6 +104,7 @@ async def connect(path: str) -> AsyncIterator[aiosqlite.Connection]:
 
 def connect_sync(path: str, **kwargs: Any) -> sqlite3.Connection:
     """Synchronous twin for stores that keep one long-lived connection."""
+    _ensure_parent(path)
     conn: sqlite3.Connection = sqlite3.connect(path, **kwargs)
     for attempt in range(6):
         try:

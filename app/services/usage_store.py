@@ -8,7 +8,6 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from pathlib import Path
 
 import aiosqlite
 from pydantic import BaseModel
@@ -78,7 +77,6 @@ class UsageStore:
 
     async def _ensure_schema(self) -> None:
         if not self._initialized:
-            Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
             async with connect(self._db_path) as db:
                 await db.executescript(_SCHEMA)
                 await self._migrate(db)

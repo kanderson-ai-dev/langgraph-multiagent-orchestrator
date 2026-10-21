@@ -231,8 +231,6 @@ class PromptRegistry:
 
     @staticmethod
     def _open_db(db_path: str) -> sqlite3.Connection:
-        if db_path != ":memory:":
-            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         from app.services.sqlite_util import connect_sync
 
         conn = connect_sync(db_path, check_same_thread=False)
