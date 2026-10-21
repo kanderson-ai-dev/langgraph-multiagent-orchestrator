@@ -12,7 +12,7 @@ content** gathered by the Researcher agent.
 | Direct prompt injection | User-supplied `Brief` (topic, audience, requirements) | `screen_brief` / `screen_input` runs *before* any LLM or external call — blocked input burns zero tokens (`app/graph/guardrails.py`) |
 | Indirect prompt injection | Scraped HTML / parsed PDFs containing embedded instructions | `sanitize_untrusted` (invisible-char normalization + instruction-phrase defanging) applied in the Researcher before text reaches state; treated strictly as *data* in prompts |
 | Prompt leakage | Final report echoing system prompts or reflected instructions | `screen_output` on the assembled report before it ships (OWASP LLM02) |
-| SSRF | Researcher fetching arbitrary URLs | Scheme allowlist (`http`/`https`); hostnames DNS-resolved and rejected when **any** answer is private/loopback/link-local/reserved/multicast/unspecified; every redirect hop re-vetted (bounded at `SCRAPE_MAX_REDIRECTS`) — `app/services/scraper_client.py` |
+| SSRF | Researcher fetching arbitrary URLs | Scheme allowlist (`http`/`https`); hostnames DNS-resolved and rejected when **any** answer is non-public; connections dial the **vetted literal IP** via a custom httpcore backend (rebinding/TOCTOU closed — Host/SNI preserved); every redirect hop re-vetted (bounded at `SCRAPE_MAX_REDIRECTS`) — `app/services/scraper_client.py` |
 | Credential leakage | Logs, errors, config | `SecretStr` config, `structlog` field redaction, generic 401s, no secrets in query strings |
 | Auth bypass | Job/report endpoints | JWT when `JWT_SECRET_KEY` is set; all routes scoped by `workspace_id` (multi-tenant isolation) |
 | Rate abuse | `/auth/login`, job submission | Sliding-window `RateLimiter` protocol — in-memory default, Redis backend for multi-replica (`app/core/rate_limit.py`) |
@@ -119,11 +119,19 @@ real scraped HTML and LLM payloads. Before a cassette is committed:
 
 - In-memory rate limiter does not coordinate across replicas (documented in
   code and README).
-- SSRF: hostnames are DNS-resolved and every redirect hop re-vetted, but
-  the check and the connect are two moments — a hostile domain could flip
-  answers between them (TOCTOU). Fully closing it means connecting to the
-  vetted IP with Host/SNI preserved (custom httpx transport) — a
-  documented next step.
+- SSRF: DNS-rebinding TOCTOU is **closed** — the scraper's connection
+  pool uses a custom `httpcore` network backend
+  (`_VettedDialBackend`, `app/services/scraper_client.py`) that
+  re-resolves inside `connect_tcp`, vetoes every answer and dials only
+  the vetted literal IP. The request URL is never rewritten, so `Host`,
+  TLS SNI and certificate hostname verification keep the original
+  hostname. The early gate (`_check_destination`) still runs per request
+  and per redirect hop for clear errors; the backend is the authoritative
+  connect-time veto. `_bad_address` also unwraps IPv4-mapped IPv6 and
+  rejects any non-global address (carrier-grade NAT, benchmarking, …).
+  The custom transport drops env-proxy honouring on purpose — an
+  `HTTP(S)_PROXY` variable would otherwise route DNS+connect through a
+  proxy and bypass the guard.
 - robots.txt: 4xx → allow (RFC 9309); 5xx/timeouts →
   `SCRAPE_ROBOTS_FAIL_POLICY` (`allow` default for politeness, `deny`
   for strict deployments).

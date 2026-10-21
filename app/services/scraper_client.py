@@ -13,8 +13,12 @@ import time
 import urllib.parse
 import urllib.robotparser
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
+from typing import Any
 
+import httpcore
 import httpx
+from httpcore._backends.auto import AutoBackend
 from pydantic import BaseModel
 from tenacity import (
     retry,
@@ -55,6 +59,135 @@ class _RobotsUnreachable(Exception):
     """robots.txt fetch failed server-side (5xx) — policy decides."""
 
 
+def _bad_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Any address a server-side fetch must never connect to.
+
+    IPv4-mapped IPv6 is unwrapped first so ``::ffff:10.0.0.1`` is judged
+    by its real target. ``not is_global`` is the catch-all behind the
+    explicit flags — it rejects carrier-grade NAT (100.64.0.0/10),
+    benchmarking ranges and any future non-public block the flag set
+    does not name.
+    """
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+        or not ip.is_global
+    )
+
+
+class _VettedDialBackend(httpcore.AsyncNetworkBackend):
+    """Dial the DNS answers it vetted — closes the resolve→connect TOCTOU.
+
+    httpcore calls ``connect_tcp(host, port)`` with the *origin hostname*
+    the moment a new connection is needed. This backend resolves there
+    (``_resolve_addresses``, the same seam tests fake), re-vets every
+    answer and dials the vetted literal IP — so a hostile domain flipping
+    DNS between the request-time check and the actual connect still hits
+    the veto. The request URL is never rewritten: ``Host``, TLS SNI and
+    certificate hostname verification all keep the original hostname.
+    ``ScrapeError`` propagates unwrapped (it is not a ``ConnectError``),
+    so callers see the same exception as the request-time gate.
+    """
+
+    def __init__(
+        self,
+        resolve: Callable[[str], Awaitable[list[str]]],
+        *,
+        inner: httpcore.AsyncNetworkBackend | None = None,
+    ) -> None:
+        self._resolve = resolve
+        self._inner = inner if inner is not None else AutoBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        try:  # literal IP — no DNS, still goes through the veto
+            ipaddress.ip_address(host)
+            candidates = [host]
+        except ValueError:
+            candidates = await self._resolve(host)
+        vetted: list[str] = []
+        for raw in candidates:
+            try:
+                ip = ipaddress.ip_address(raw)
+            except ValueError:
+                raise ScrapeError(f"host {host!r} resolved to {raw!r}") from None
+            if _bad_address(ip):
+                raise ScrapeError(
+                    f"host {host!r} resolves to disallowed address {raw}"
+                )
+            vetted.append(raw)
+        if not vetted:
+            raise ScrapeError(f"host {host!r} resolved to no addresses")
+        last_exc: OSError | None = None
+        for addr in vetted:
+            try:
+                return await self._inner.connect_tcp(
+                    addr,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except OSError as exc:
+                last_exc = exc
+        raise ScrapeError(
+            f"cannot connect to any resolved address for {host!r}"
+        ) from last_exc
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        return await self._inner.connect_unix_socket(
+            path, timeout=timeout, socket_options=socket_options
+        )
+
+    async def sleep(self, seconds: float) -> None:
+        await self._inner.sleep(seconds)
+
+
+class _VettedHTTPTransport(httpx.AsyncHTTPTransport):
+    """``AsyncHTTPTransport`` whose pool dials through ``_VettedDialBackend``.
+
+    Subclassing keeps respx/VCR-style mocks working (they patch the
+    pool's ``handle_async_request`` upstream of the backend) while every
+    real connection goes through the vetted dial. The pool is built
+    without ``trust_env`` proxy support on purpose: an HTTP(S)_PROXY env
+    var would hand the request — including DNS — to the proxy and bypass
+    the SSRF guard entirely.
+    """
+
+    def __init__(
+        self,
+        backend: httpcore.AsyncNetworkBackend,
+        *,
+        http2: bool = False,
+        limits: httpx.Limits,
+    ) -> None:
+        self._pool = httpcore.AsyncConnectionPool(
+            http1=True,
+            http2=http2,
+            max_connections=limits.max_connections,
+            max_keepalive_connections=limits.max_keepalive_connections,
+            keepalive_expiry=limits.keepalive_expiry,
+            network_backend=backend,
+        )
+
+
 class ScraperClient:
     """Async fetcher enforcing politeness, robots.txt and SSRF guards."""
 
@@ -93,17 +226,7 @@ class ScraperClient:
             pass  # hostname, not an IP literal — DNS-checked below
         return url
 
-    @staticmethod
-    def _bad_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-        """Any address a server-side fetch must never connect to."""
-        return (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        )
+    _bad_address = staticmethod(_bad_address)
 
     async def _resolve_addresses(self, host: str) -> list[str]:
         """DNS resolution — a single seam so tests can fake the resolver."""
@@ -118,11 +241,12 @@ class ScraperClient:
         is non-public — a public-looking host can still resolve to
         loopback, link-local metadata endpoints or private ranges.
 
-        Known residual gap (TOCTOU): DNS is checked here, then httpx
-        resolves again at connect time — a hostile domain could flip
-        answers between the two. Fully closing it means connecting to the
-        vetted IP while preserving Host/SNI, which needs a custom httpx
-        transport; documented as a next step in SECURITY.md.
+        This is the *early* gate — it gives a clear ``ScrapeError`` before
+        any network I/O. The connect-time gate is authoritative:
+        ``_VettedDialBackend`` re-resolves inside ``connect_tcp`` and
+        dials only the vetted literal IP, so a hostile domain cannot
+        flip DNS answers between this check and the real connection
+        (DNS-rebinding / TOCTOU closed; Host/SNI stay the hostname).
         """
         url = self._validate_url(url)
         host = urllib.parse.urlparse(url).hostname or ""
@@ -220,8 +344,12 @@ class ScraperClient:
                     self._client = httpx.AsyncClient(
                         timeout=self._settings.scrape_timeout_seconds,
                         http2=_HTTP2,
-                        limits=httpx.Limits(
-                            max_connections=20, max_keepalive_connections=10
+                        transport=_VettedHTTPTransport(
+                            _VettedDialBackend(self._resolve_addresses),
+                            http2=_HTTP2,
+                            limits=httpx.Limits(
+                                max_connections=20, max_keepalive_connections=10
+                            ),
                         ),
                     )
         return self._client

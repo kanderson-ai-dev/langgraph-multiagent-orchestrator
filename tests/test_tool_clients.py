@@ -8,7 +8,11 @@ import respx
 
 from app.core.config import Settings
 from app.services.document_parser import parse_document
-from app.services.scraper_client import ScrapeError, ScraperClient
+from app.services.scraper_client import (
+    ScrapeError,
+    ScraperClient,
+    _VettedDialBackend,
+)
 from app.services.search_client import (
     DuckDuckGoSearchClient,
     NullSearchClient,
@@ -231,6 +235,144 @@ async def test_scraper_redirect_limit(
     s = ScraperClient(scraper_settings)
     with pytest.raises(ScrapeError, match="redirect limit"):
         await s.scrape("https://ok.test/r0")
+
+
+# ─── DNS-rebinding TOCTOU (connect to the vetted IP) ─────────────────────────
+
+
+class _FakeInner:
+    """Records what the dial backend actually connects to."""
+
+    def __init__(self) -> None:
+        self.dialed: list[tuple[str, int]] = []
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: Any = None,
+        local_address: Any = None,
+        socket_options: Any = None,
+    ) -> object:
+        self.dialed.append((host, port))
+        return object()  # opaque stream stand-in
+
+    async def connect_unix_socket(self, path: str, **kw: Any) -> object:
+        raise AssertionError("unix sockets are not used by the scraper")
+
+    async def sleep(self, seconds: float) -> None:
+        return None
+
+
+def _flip_resolver(answers: list[list[str]]) -> Any:
+    calls = iter(answers)
+
+    async def fake(host: str) -> list[str]:
+        return next(calls)
+
+    return fake
+
+
+async def test_backend_dials_vetted_ip_not_hostname() -> None:
+    inner = _FakeInner()
+    backend = _VettedDialBackend(_flip_resolver([[_PUBLIC_IP]]), inner=inner)
+    stream = await backend.connect_tcp("ok.test", 443)
+    assert stream is not None
+    # The socket targets the vetted literal IP — the hostname only lives
+    # in the request URL (Host header, TLS SNI, cert verification).
+    assert inner.dialed == [(_PUBLIC_IP, 443)]
+
+
+async def test_rebinding_second_resolution_rejected() -> None:
+    inner = _FakeInner()
+    backend = _VettedDialBackend(
+        _flip_resolver([[_PUBLIC_IP], ["127.0.0.1"]]), inner=inner
+    )
+    await backend.connect_tcp("sneaky.test", 443)
+    assert inner.dialed == [(_PUBLIC_IP, 443)]
+    with pytest.raises(ScrapeError, match="disallowed address"):
+        await backend.connect_tcp("sneaky.test", 443)
+    # loopback was never dialed — second resolution was vetoed at connect
+    assert inner.dialed == [(_PUBLIC_IP, 443)]
+
+
+async def test_backend_rejects_mixed_answers() -> None:
+    inner = _FakeInner()
+    backend = _VettedDialBackend(
+        _flip_resolver([[_PUBLIC_IP, "10.9.9.9"]]), inner=inner
+    )
+    with pytest.raises(ScrapeError, match="disallowed address"):
+        await backend.connect_tcp("mixed.test", 443)
+    assert inner.dialed == []
+
+
+async def test_backend_rejects_nonpublic_addresses() -> None:
+    inner = _FakeInner()
+    for bad in (
+        "::1",
+        "::ffff:127.0.0.1",  # IPv4-mapped loopback
+        "::ffff:10.0.0.1",  # IPv4-mapped private
+        "169.254.169.254",  # cloud metadata
+        "0.0.0.0",
+        "100.64.0.1",  # carrier-grade NAT
+        "198.18.0.1",  # benchmarking range
+    ):
+        backend = _VettedDialBackend(_flip_resolver([[bad]]), inner=inner)
+        with pytest.raises(ScrapeError):
+            await backend.connect_tcp("evil.test", 443)
+    assert inner.dialed == []
+
+
+async def test_backend_vets_ip_literals_without_dns() -> None:
+    inner = _FakeInner()
+
+    async def explode(host: str) -> list[str]:
+        raise AssertionError("resolver must not run for IP literals")
+
+    backend = _VettedDialBackend(explode, inner=inner)
+    with pytest.raises(ScrapeError, match="disallowed address"):
+        await backend.connect_tcp("169.254.169.254", 80)
+    assert inner.dialed == []
+
+
+async def test_backend_public_literal_dialed_directly() -> None:
+    inner = _FakeInner()
+
+    async def explode(host: str) -> list[str]:
+        raise AssertionError("resolver must not run for IP literals")
+
+    backend = _VettedDialBackend(explode, inner=inner)
+    await backend.connect_tcp(_PUBLIC_IP, 80)
+    assert inner.dialed == [(_PUBLIC_IP, 80)]
+
+
+async def test_backend_empty_resolution_rejected() -> None:
+    backend = _VettedDialBackend(_flip_resolver([[]]), inner=_FakeInner())
+    with pytest.raises(ScrapeError, match="no addresses"):
+        await backend.connect_tcp("gone.test", 443)
+
+
+async def test_shared_client_uses_vetted_transport(
+    scraper_settings: Settings,
+) -> None:
+    s = ScraperClient(scraper_settings)
+    client = await s._shared_client()
+    backend = client._transport._pool._network_backend  # type: ignore[attr-defined]
+    assert isinstance(backend, _VettedDialBackend)
+
+
+async def test_bad_address_flags_cgnat_and_mapped() -> None:
+    import ipaddress
+
+    for bad in (
+        "100.64.0.1",
+        "::ffff:10.0.0.1",
+        "::ffff:169.254.169.254",
+        "0.0.0.0",
+        "::",
+    ):
+        assert ScraperClient._bad_address(ipaddress.ip_address(bad)), bad
+    assert not ScraperClient._bad_address(ipaddress.ip_address("8.8.8.8"))
 
 
 # ─── robots.txt failure policy (Phase 17) ────────────────────────────────────
