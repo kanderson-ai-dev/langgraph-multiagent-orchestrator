@@ -73,9 +73,13 @@ class JobRunner:
     async def events(self, job_id: str) -> list[dict[str, Any]]:
         return await self._bus.history(job_id)
 
-    async def stream(self, job_id: str) -> AsyncGenerator[dict[str, Any], None]:
-        """Yield buffered then live events until the job reaches a terminal state."""
-        async for e in self._bus.subscribe(job_id):
+    async def stream(
+        self, job_id: str, *, after: int | None = None
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Yield buffered then live events until the job reaches a terminal
+        state. ``after`` replays only events with ``seq > after`` — the
+        ``Last-Event-ID`` a re-attaching SSE client last saw."""
+        async for e in self._bus.subscribe(job_id, after=after):
             yield e
 
     async def submit(

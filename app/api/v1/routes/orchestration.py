@@ -148,15 +148,29 @@ async def stream(
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
 
+    # Re-attach support: a client that saw events up to `id: n` sends
+    # Last-Event-ID: n and gets only what it missed. A non-integer or
+    # negative value is ignored — never a 4xx on a resume hint.
+    last_id: int | None = None
+    raw_last = request.headers.get("last-event-id")
+    if raw_last is not None:
+        try:
+            parsed = int(raw_last)
+            last_id = parsed if parsed >= 0 else None
+        except ValueError:
+            last_id = None
+
     async def events() -> AsyncIterator[str]:
         """SSE stream: heartbeat comments keep proxies alive, client
         disconnect frees the bus subscriber, and a hard lifetime cap ends
-        stale streams with a ``timeout`` frame the console re-attaches on."""
+        stale streams with a ``timeout`` frame the console re-attaches on.
+        Job events carry ``id: <seq>`` so re-attaches can resume with
+        ``Last-Event-ID`` instead of re-reading the whole history."""
         import asyncio
         import contextlib
         import time
 
-        source = _runner(request).stream(job_id)
+        source = _runner(request).stream(job_id, after=last_id)
         it = source.__aiter__()
         deadline = time.monotonic() + settings.sse_max_stream_seconds
         # The pending ``anext`` must never be cancelled — cancelling it
@@ -193,7 +207,11 @@ async def stream(
                 except StopAsyncIteration:
                     break
                 pending = None
-                yield f"data: {json.dumps(e)}\n\n"
+                seq = e.get("seq")
+                if seq is not None:
+                    yield f"id: {seq}\ndata: {json.dumps(e)}\n\n"
+                else:
+                    yield f"data: {json.dumps(e)}\n\n"
         finally:
             if pending is not None and not pending.done():
                 # Cancel, then await — aclose() raises "generator already

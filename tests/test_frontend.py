@@ -1,9 +1,13 @@
 """Frontend static mounts — landing at `/`, console at `/console`,
 and proof that static mounts never shadow API routes."""
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+
+_FRONTEND = Path(__file__).resolve().parent.parent / "frontend" / "console" / "js"
 
 
 def _client() -> TestClient:
@@ -27,6 +31,15 @@ def test_console_assets_served() -> None:
     client = _client()
     assert client.get("/console/styles.css").status_code == 200
     assert client.get("/console/app.js").status_code == 200
+
+
+def test_sse_reader_resumes_with_last_event_id() -> None:
+    """Pin the console's replay contract: `sse.js` must track the `id:`
+    line, echo it as `Last-Event-ID` on re-attach, and drop stale frames."""
+    src = (_FRONTEND / "sse.js").read_text(encoding="utf-8")
+    assert "Last-Event-ID" in src
+    assert 'startsWith("id:")' in src
+    assert "lastId" in src
 
 
 def test_api_routes_not_shadowed() -> None:

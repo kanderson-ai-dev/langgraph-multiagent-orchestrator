@@ -1,8 +1,9 @@
 /* SSE reader — fetch + ReadableStream instead of EventSource so the
  * Authorization header rides along (EventSource cannot set headers).
- * Parses `data:` frames exactly like EventSource; no auto-reconnect —
- * the jobs view re-opens the stream when needed. Returns a handle so the
- * caller owns lifecycle. */
+ * Parses `data:`/`id:` frames exactly like EventSource; re-attaches send
+ * `Last-Event-ID` so the server replays only what was missed and frames
+ * whose id is not newer than the last delivered are dropped (dedup).
+ * Returns a handle so the caller owns lifecycle. */
 
 import { authHeaders } from "./api.js";
 
@@ -14,11 +15,16 @@ export function openStream(jobId, onEvent) {
   // failures count against the cap. Terminal job events close the stream
   // from the caller side, so a reconnect only replays history and ends.
   let attempts = 0;
+  // Last `id:` seen across all attaches — re-attach sends it as
+  // Last-Event-ID and the server replays only events with a higher seq.
+  let lastId = null;
   const run = async () => {
     try {
+      const headers = { ...authHeaders() };
+      if (lastId !== null) headers["Last-Event-ID"] = String(lastId);
       const res = await fetch(
         `/api/v1/orchestration/reports/${jobId}/stream`,
-        { headers: authHeaders(), signal: ctrl.signal },
+        { headers, signal: ctrl.signal },
       );
       if (!res.ok || !res.body) return;
       const reader = res.body.getReader();
@@ -31,12 +37,22 @@ export function openStream(jobId, onEvent) {
         const frames = buf.split("\n\n");
         buf = frames.pop(); // trailing partial frame stays buffered
         for (const frame of frames) {
-          const data = frame
-            .split("\n")
+          const lines = frame.split("\n");
+          const idLine = lines.find((l) => l.startsWith("id:"));
+          const frameId = idLine ? idLine.slice(3).trim() : null;
+          const data = lines
             .filter((l) => l.startsWith("data:"))
             .map((l) => l.slice(5).trimStart())
             .join("\n");
           if (!data) continue; // `: ping` heartbeats carry no data:
+          if (frameId !== null) {
+            const n = Number(frameId);
+            // Only an integer id can dedup — a non-integer still delivers.
+            if (Number.isInteger(n)) {
+              if (lastId !== null && n <= lastId) continue; // replay dup
+              lastId = n;
+            }
+          }
           attempts = 0; // a real event just flowed — the stream is healthy
           try {
             onEvent(JSON.parse(data));

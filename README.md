@@ -325,7 +325,7 @@ determinism, the live run proves quality.
 | `POST /api/v1/orchestration/reports` | Submit a report brief → `202` + job record |
 | `GET /api/v1/orchestration/reports` | List jobs (workspace-scoped) |
 | `GET /api/v1/orchestration/reports/{id}` | Poll status, team, cost and result |
-| `GET /api/v1/orchestration/reports/{id}/stream` | Live progress via SSE (per-node events, HITL interrupts) |
+| `GET /api/v1/orchestration/reports/{id}/stream` | Live progress via SSE (per-node events, HITL interrupts) — `id:` lines + `Last-Event-ID` resume on reconnect |
 | `POST /api/v1/orchestration/reports/{id}/review` | HITL decision — the server publishes `allowed_actions` per pause and rejects off-menu actions |
 | `GET /api/v1/orchestration/reports/{id}/report.{pdf,md,docx}` | Download the final report |
 | `GET /api/v1/orchestration/reports/{id}/audit` | Hash-chained audit trail + server-side verification |
@@ -374,6 +374,10 @@ curl -s http://localhost:8000/api/v1/orchestration/reports/<job_id>
 
 # Stream live progress (supervisor dispatches, debate, interrupts)
 curl -N http://localhost:8000/api/v1/orchestration/reports/<job_id>/stream
+
+# Resume after a dropped connection — replays only events after the id
+curl -N http://localhost:8000/api/v1/orchestration/reports/<job_id>/stream \
+  -H "Last-Event-ID: 42"
 
 # Resolve a job paused for human review — fund or approve
 curl -s -X POST http://localhost:8000/api/v1/orchestration/reports/<job_id>/review \
