@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.core.dependencies import RequestContext, require_role
-from app.services.feedback_store import FeedbackStore
+from app.services.store_protocols import FeedbackStoreProtocol
 
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 
@@ -27,7 +27,7 @@ class FeedbackIn(BaseModel):
     section: str | None = Field(default=None, max_length=200)
 
 
-def _store(request: Request) -> FeedbackStore:
+def _store(request: Request) -> FeedbackStoreProtocol:
     return request.app.state.feedback_store  # type: ignore[no-any-return]
 
 

@@ -22,11 +22,11 @@ from app.core.event_bus import EventBus, InMemoryEventBus
 from app.core.logging import get_logger
 from app.graph.graph import initial_state
 from app.graph.state import Brief
-from app.services.job_store import JobRecord, JobStore
+from app.services.job_store import JobRecord
 from app.services.prompt_registry import PromptRegistry
 from app.services.scraper_client import ScraperClient
+from app.services.store_protocols import JobStoreProtocol, UsageStoreProtocol
 from app.services.tracing import bind_trace
-from app.services.usage_store import UsageStore
 
 logger = get_logger(__name__)
 
@@ -37,8 +37,8 @@ class JobRunner:
     def __init__(
         self,
         graph: CompiledStateGraph[Any],
-        job_store: JobStore,
-        usage_store: UsageStore,
+        job_store: JobStoreProtocol,
+        usage_store: UsageStoreProtocol,
         settings: Settings,
         prompt_registry: PromptRegistry | None = None,
         scraper: ScraperClient | None = None,
@@ -56,11 +56,11 @@ class JobRunner:
         self._trace_ids: dict[str, str] = {}
 
     @property
-    def job_store(self) -> JobStore:
+    def job_store(self) -> JobStoreProtocol:
         return self._jobs
 
     @property
-    def usage_store(self) -> UsageStore:
+    def usage_store(self) -> UsageStoreProtocol:
         return self._usage
 
     @property

@@ -17,7 +17,8 @@ from app.core.dependencies import RequestContext, get_rate_limiter, require_role
 from app.core.rate_limit import RateLimiter
 from app.graph.state import Brief
 from app.services.job_runner import JobRunner
-from app.services.job_store import JobRecord, JobStore
+from app.services.job_store import JobRecord
+from app.services.store_protocols import JobStoreProtocol
 from app.services.tracing import create_trace_id
 
 router = APIRouter(prefix="/orchestration", tags=["orchestration"])
@@ -59,7 +60,7 @@ def _runner(request: Request) -> JobRunner:
     return request.app.state.runner  # type: ignore[no-any-return]
 
 
-def _jobs(request: Request) -> JobStore:
+def _jobs(request: Request) -> JobStoreProtocol:
     return request.app.state.job_store  # type: ignore[no-any-return]
 
 

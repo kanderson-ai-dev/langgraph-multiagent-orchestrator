@@ -14,13 +14,14 @@ from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
 from app.core.dependencies import RequestContext, require_role
-from app.services.workspace_store import ROLES, WorkspaceStore
+from app.services.store_protocols import WorkspaceStoreProtocol
+from app.services.workspace_store import ROLES
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 
 
-def _store(request: Request) -> WorkspaceStore:
-    store: WorkspaceStore | None = getattr(
+def _store(request: Request) -> WorkspaceStoreProtocol:
+    store: WorkspaceStoreProtocol | None = getattr(
         request.app.state, "workspace_store", None
     )
     if store is None:
@@ -29,7 +30,7 @@ def _store(request: Request) -> WorkspaceStore:
 
 
 async def _require_ws_admin(
-    store: WorkspaceStore,
+    store: WorkspaceStoreProtocol,
     ctx: RequestContext,
     workspace_id: str,
     admin_subject: str | None,

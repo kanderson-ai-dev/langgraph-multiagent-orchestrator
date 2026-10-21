@@ -152,6 +152,11 @@ class Settings(BaseSettings):
     # Persistence
     database_path: str = "data/orchestrator.sqlite"
     checkpoint_db_path: str = "data/checkpoints.sqlite"
+    # Store backend: "sqlite" (default, single-node) or "postgres"
+    # (multi-replica; requires ``database_url``). The LangGraph
+    # checkpointer keeps its own path either way.
+    storage_backend: Literal["sqlite", "postgres"] = "sqlite"
+    database_url: SecretStr | None = None
 
     # Cost accounting (USD per 1M tokens)
     cost_input_price_per_1m: float = Field(default=0.15, ge=0.0)
@@ -184,6 +189,7 @@ class Settings(BaseSettings):
         "audit_signing_key",
         "audit_signing_previous_keys",
         "redis_url",
+        "database_url",
         mode="before",
     )
     @classmethod

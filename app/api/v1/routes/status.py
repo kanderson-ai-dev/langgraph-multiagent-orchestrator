@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from app.core.config import Settings, get_settings
-from app.services.job_store import JobStore
+from app.services.store_protocols import JobStoreProtocol
 
 router = APIRouter(tags=["status"])
 
@@ -33,7 +33,7 @@ async def status(
 ) -> dict[str, Any]:
     started = getattr(request.app.state, "started_at", None)
     uptime = round(time.monotonic() - started, 1) if started else None
-    jobs: JobStore = request.app.state.job_store
+    jobs: JobStoreProtocol = request.app.state.job_store
     return {
         "status": "ok",
         "version": settings.app_version,

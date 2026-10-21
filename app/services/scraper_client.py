@@ -29,7 +29,7 @@ from tenacity import (
 
 from app.core.config import Settings
 from app.core.logging import get_logger
-from app.services.cache_store import CacheStore
+from app.services.store_protocols import CacheStoreProtocol
 
 logger = get_logger(__name__)
 
@@ -196,7 +196,7 @@ class ScraperClient:
         settings: Settings,
         *,
         client: httpx.AsyncClient | None = None,
-        cache: CacheStore | None = None,
+        cache: CacheStoreProtocol | None = None,
     ) -> None:
         self._settings = settings
         self._client = client
@@ -432,7 +432,7 @@ class ScraperClient:
     async def scrape(self, url: str, *, workspace_id: str = "") -> ScrapedPage:
         """Fetch ``url`` with robots.txt + politeness + size cap.
 
-        With ``workspace_id`` + a ``CacheStore``, successful fetches are
+        With ``workspace_id`` + a ``CacheStoreProtocol``, successful fetches are
         cached per ``(workspace_id, url, UTC day)`` — tenant-scoped, so no
         content ever crosses tenants. Robots.txt still gates every call,
         including cache hits (policy may have changed since the fetch).

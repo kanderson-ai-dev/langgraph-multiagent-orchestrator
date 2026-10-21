@@ -19,7 +19,7 @@ from app.core.security import verify_token
 from app.services.workspace_store import KEY_PREFIX
 
 if TYPE_CHECKING:
-    from app.services.workspace_store import WorkspaceStore
+    from app.services.store_protocols import WorkspaceStoreProtocol
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -68,7 +68,7 @@ async def get_context(
 
     token = creds.credentials
     if token.startswith(KEY_PREFIX):
-        store: WorkspaceStore | None = getattr(
+        store: WorkspaceStoreProtocol | None = getattr(
             request.app.state, "workspace_store", None
         )
         record = await store.lookup_api_key(token) if store else None

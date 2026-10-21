@@ -82,8 +82,13 @@ def _done_job(client: TestClient) -> str:
     job_id = r.json()["job_id"]
     for _ in range(300):
         body = client.get(f"/api/v1/orchestration/reports/{job_id}").json()
-        if body["status"] in ("done", "failed", "blocked"):
+        if body["status"] == "done":
             return job_id
+        if body["status"] in ("failed", "blocked"):
+            raise AssertionError(
+                f"job ended {body['status']}: "
+                f"{body.get('result') or body}"
+            )
         time.sleep(0.05)
     raise AssertionError("job never finished")
 

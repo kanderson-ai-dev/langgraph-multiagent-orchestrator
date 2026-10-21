@@ -28,16 +28,13 @@ from app.core.event_bus import build_event_bus
 from app.core.logging import configure_logging, get_logger
 from app.core.metrics import instrument_app
 from app.graph.graph import build_graph
-from app.services.feedback_store import FeedbackStore
 from app.services.job_runner import JobRunner
-from app.services.job_store import JobStore
 from app.services.llm_client import build_llm
 from app.services.prompt_registry import DEFAULT_PROMPTS_DIR, PromptRegistry
 from app.services.scraper_client import ScraperClient
 from app.services.search_client import build_search_client
+from app.services.store_factory import AppStores, build_stores
 from app.services.tracing import init_tracing, shutdown_tracing
-from app.services.usage_store import UsageStore
-from app.services.workspace_store import WorkspaceStore
 
 logger = get_logger(__name__)
 
@@ -87,18 +84,21 @@ def _csp_for(path: str) -> str:
 
 
 def build_runner(
-    settings: Settings, checkpointer: BaseCheckpointSaver[Any] | None = None
+    settings: Settings,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
+    stores: AppStores | None = None,
 ) -> JobRunner:
     """Construct the runner with a live (checkpointer-backed) graph.
 
     The Prompt Registry is loaded (and validated) here — a corrupt or
     missing artifact raises and the app fails fast at startup.
     """
-    from app.services.cache_store import CacheStore
     from app.services.llm_client import build_llm_overrides
 
+    stores = stores or build_stores(settings)
+
     llm = build_llm(settings)
-    cache = CacheStore(settings.database_path) if settings.cache_enabled else None
+    cache = stores.cache_store
     search = build_search_client(settings, cache=cache)
     scraper = ScraperClient(settings, cache=cache)
     prev_raw = (
@@ -122,8 +122,8 @@ def build_runner(
         llm_overrides=build_llm_overrides(settings),
     )
     return JobRunner(
-        graph, JobStore(settings.database_path),
-        UsageStore(settings.database_path), settings,
+        graph, stores.job_store,
+        stores.usage_store, settings,
         prompt_registry=prompts, scraper=scraper,
         event_bus=build_event_bus(settings),
     )
@@ -165,19 +165,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             saver = await stack.enter_async_context(
                 sqlite_checkpointer(settings.checkpoint_db_path)
             )
-            app.state.runner = build_runner(settings, checkpointer=saver)
-            app.state.job_store = app.state.runner.job_store
-            app.state.usage_store = app.state.runner.usage_store
+            app.state.stores = build_stores(settings)
+            app.state.runner = build_runner(
+                settings, checkpointer=saver, stores=app.state.stores
+            )
+            app.state.job_store = app.state.stores.job_store
+            app.state.usage_store = app.state.stores.usage_store
+        if not hasattr(app.state, "stores"):
+            # Tests that pre-set only the runner get the default backend.
+            app.state.stores = build_stores(settings)
+        stores = app.state.stores
         if not hasattr(app.state, "prompt_registry"):
             app.state.prompt_registry = app.state.runner.prompt_registry
         if not hasattr(app.state, "workspace_store"):
-            app.state.workspace_store = WorkspaceStore(settings.database_path)
+            app.state.workspace_store = stores.workspace_store
         if not hasattr(app.state, "feedback_store"):
-            app.state.feedback_store = FeedbackStore(settings.database_path)
+            app.state.feedback_store = stores.feedback_store
         if not hasattr(app.state, "token_store"):
-            from app.services.token_store import SqliteTokenStore
-
-            app.state.token_store = SqliteTokenStore(settings.database_path)
+            app.state.token_store = stores.token_store
         app.state.started_at = time.monotonic()
         # Idempotent bootstrap: pre-RBAC implicit tenants land in the
         # ``default`` workspace with the platform admin as its admin member.

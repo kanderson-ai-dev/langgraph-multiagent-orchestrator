@@ -6,8 +6,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.core.config import Settings, get_settings
 from app.core.dependencies import RequestContext, require_role
-from app.services.job_store import JobStore
-from app.services.usage_store import UsageStore
+from app.services.store_protocols import JobStoreProtocol, UsageStoreProtocol
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -19,7 +18,7 @@ async def summary(
 ) -> dict[str, object]:
     from app.core.latency import LATENCY
 
-    store: UsageStore = request.app.state.usage_store
+    store: UsageStoreProtocol = request.app.state.usage_store
     s = await store.workspace_summary(ctx.workspace_id)
     quantiles = LATENCY.quantiles()
     job = quantiles.pop("job", {})
@@ -54,8 +53,8 @@ async def performance(
     from app.core.latency import LATENCY
 
     ws = ctx.workspace_id
-    jobs: JobStore = request.app.state.job_store
-    usage: UsageStore = request.app.state.usage_store
+    jobs: JobStoreProtocol = request.app.state.job_store
+    usage: UsageStoreProtocol = request.app.state.usage_store
 
     counts = await jobs.status_counts(ws)
     done = counts.get("done", 0)

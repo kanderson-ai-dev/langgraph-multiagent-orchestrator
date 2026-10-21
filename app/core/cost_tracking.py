@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.core.metrics import LLM_CALLS_TOTAL, LLM_COST_USD, LLM_TOKENS_TOTAL
-from app.services.usage_store import UsageStore
+from app.services.store_protocols import UsageStoreProtocol
 
 logger = get_logger(__name__)
 
@@ -188,7 +188,7 @@ class UsageTracker:
         *,
         job_id: str,
         workspace_id: str,
-        store: UsageStore,
+        store: UsageStoreProtocol,
         settings: Settings,
         base_cost: float = 0.0,
         budget_usd: float | None = None,

@@ -19,7 +19,7 @@ from tenacity import (
 
 from app.core.config import Settings
 from app.core.logging import get_logger
-from app.services.cache_store import CacheStore
+from app.services.store_protocols import CacheStoreProtocol
 
 logger = get_logger(__name__)
 
@@ -125,7 +125,7 @@ class CachingSearchClient:
     """
 
     def __init__(
-        self, inner: SearchClient, cache: CacheStore, *, ttl_hours: float
+        self, inner: SearchClient, cache: CacheStoreProtocol, *, ttl_hours: float
     ) -> None:
         self._inner = inner
         self._cache = cache
@@ -166,7 +166,7 @@ class CachingSearchClient:
 
 
 def build_search_client(
-    settings: Settings, *, cache: CacheStore | None = None
+    settings: Settings, *, cache: CacheStoreProtocol | None = None
 ) -> SearchClient:
     provider = settings.effective_search_provider
     inner: SearchClient
