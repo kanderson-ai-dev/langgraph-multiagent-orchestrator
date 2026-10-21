@@ -241,7 +241,7 @@ metrics that matter in this domain.
 | Task performance | Reviewer rubric (1–5) | avg ≥ 4.0 | **4.500** ✅ |
 | Orchestration health | Debate convergence within `MAX_DEBATE_ROUNDS` | ≥ 0.85 | **1.000** ✅ |
 | Safety | Adversarial briefs blocked | 1.00 | **1.000** ✅ |
-| Latency | Full job wall-clock, live path | p50 ≤ 90s / p95 ≤ 240s | **~105s to HITL/done observed** (was 150–670s before parallel search+scrape) — converged runs land near the p50 target; see Known limitations |
+| Latency | Full job wall-clock, live path | p50 ≤ 90s / p95 ≤ 240s | **p50 76.7s / p95 78.9s** (measured 2026-10-21, `latency_bench` n=3; was ~105s) ✅ |
 | Cost | Per job (all roles, all rounds) | ≤ $0.08 | **$0.010–$0.104 observed** ✅ (upper end = full 3-round debate + fund) |
 | UI end-to-end | Browser E2E: real console → submit → SSE transcript → rendered report → clickable sources | runs in CI (Playwright) | **PASS** ✅ |
 | Test coverage | `pytest --cov=app` | ≥ 80% | **92%** ✅ |
@@ -303,11 +303,11 @@ measured against promoted **v1** on the same dataset:
 
 ![Prompt A/B in Langfuse — writer v2 vs promoted v1: citation 0.79 vs 0.85, judge 4.0 vs 4.25 — the regression correctly keeps v1 promoted](docs/eval/langfuse-ab-compare.png)
 
-`converged` reads 0.00 on every live run: the Writer↔Reviewer debate
-exhausts its 3-round budget without the Reviewer issuing `approve`, so a
-human approves via `interrupt()` (`hitl_resumes` = 1.00). Reports still
-deliver; convergence-without-escalation is the open quality gap the A/B
-gate exists to close.
+Under the promoted prompts the Writer↔Reviewer debate historically
+exhausted its 3-round budget without the Reviewer issuing `approve`,
+so a human approved via `interrupt()`. The 2026-10-21 candidate round
+moved that needle (see below) — convergence is now partially achieved
+live but still below the 0.85 gate.
 
 **Prompt A/B, 2026-10-18** (baseline run `writer-v1-f17e892-2026-10-18-1957`;
 writer **v3** + reviewer **v2** candidates on the same 7 quality briefs,
@@ -321,13 +321,34 @@ same driver, per-case evaluators):
 | Judge score (1–5) | ≈ 3.86 | ≈ 4.14 | ≥ 4.0 |
 | Avg cost / job | ≈ $0.0073 | ≈ $0.0060 | ≤ $0.08 |
 
-The candidates improve every metric — convergence moves off zero, judge
-clears 4.0, cost stays far under budget — but citation support at ≈0.61
-is still far below the 0.90 gate, so **neither candidate was promoted**.
-The two arms were measured with the same in-process driver; the Langfuse
-run above records the baseline arm (per-item retrieval is currently
-limited by Langfuse API migration, so the local per-case numbers are the
-record of truth).
+The candidates improved every metric but citation support stayed far
+below 0.90, so **neither candidate was promoted**.
+
+**Prompt A/B, 2026-10-21** (re-measurement after the citation
+critical-token check; experiment runs `writer-v1-c100fda-…-1918` vs
+`writer-v3-c100fda-…-1929`, same dataset, live `gpt-4o-mini`):
+
+| Metric | v1 (promoted) | v3+v2 (candidates) | Gate |
+|---|---|---|---|
+| Convergence (approved ≤3 rounds) | 0/7 = 0.000 | 4/7 ≈ 0.571 | ≥ 0.85 |
+| Citation support | 0.469 | **0.767** | ≥ 0.90 |
+| Reviewer rubric (1–5) | 3.000 | 3.571 | ≥ 4.0 |
+| Judge score (1–5) | 4.286 | 4.143 | ≥ 4.0 (ε 0.05) |
+| Injection/security items blocked | 0.818 | 0.818 | = 1.00 |
+| Latency p50 (live experiment items) | ~76s | ~49s | ≤ 90s |
+
+The candidate stack improves every gating metric — convergence 0→4/7,
+citation +0.30, rubric +0.57, p50 latency −27s — but still misses
+citation/convergence/rubric thresholds and regresses judge by 0.14
+(above the 0.05 epsilon). `promotion_gate` fed with the live aggregates
+returns **BLOCKED** on four sub-threshold metrics plus the judge
+regression — so the honest outcome is recorded, not a promotion: the
+A/B result is persisted in `prompt_ab_runs` (`live-ab-2026-10-21-c100fda`)
+and the same numbers feed `hitl_resumes`/convergence reads in Langfuse.
+Complementary live evidence the same day: `latency_bench` p50 76.7s /
+p95 78.9s (gate PASS) and the 3-case live matrix 3/3 (injection blocked
+at $0.000). Remaining live gap is claim-level grounding under real
+models — the open quality item.
 
 Live surfaces publish **measured results only** — there is deliberately
 no stub fallback for `--langsmith-live`/`--langfuse-live` (see
