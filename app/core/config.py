@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     # Auth (optional — open local dev when unset)
     jwt_secret_key: SecretStr | None = None
     jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = Field(default=60, gt=0)
+    jwt_expire_minutes: int = Field(default=30, gt=0)
     admin_username: str = "admin"
     admin_password_hash: SecretStr | None = None
 

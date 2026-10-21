@@ -229,7 +229,7 @@
         // If the operator signed in at /console (same-origin storage), the
         // Bearer token carries over — needed only when the API enforces auth.
         const headers = { "Content-Type": "application/json" };
-        const token = sessionStorage.getItem("orx_token") || localStorage.getItem("orx_token");
+        const token = sessionStorage.getItem("orx_token");
         if (token) headers.Authorization = `Bearer ${token}`;
         const res = await fetch("/api/v1/orchestration/reports", {
           method: "POST",

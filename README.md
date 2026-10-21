@@ -194,7 +194,8 @@ Multi-tenancy is enforced by *role × workspace*:
 surface; JWT sessions resolve `role` from the `members` table, and API
 keys carry their role inline. Members can hold their own bcrypt password
 (set by an admin) — the console keeps the token in `sessionStorage`
-unless "Remember me" opts into `localStorage`, and `POST /auth/logout`
+only (no persistent-storage opt-in; JWTs expire in
+`JWT_EXPIRE_MINUTES`, default 30 min), and `POST /auth/logout`
 revokes the `jti` server-side
 ([ADR 0006](docs/adr/0006-browser-token-storage.md)). Cross-tenant
 probes return `404` — resource existence is not leaked. The dev-mode

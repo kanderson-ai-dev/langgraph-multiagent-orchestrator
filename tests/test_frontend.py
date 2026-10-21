@@ -42,6 +42,23 @@ def test_sse_reader_resumes_with_last_event_id() -> None:
     assert "lastId" in src
 
 
+def test_no_code_path_persists_token_to_localstorage() -> None:
+    """Pin the sessionStorage-only decision (ADR 0006): nothing may read
+    or write `orx_token` in localStorage — `removeItem` (legacy scrub) is
+    the only permitted call — and no "remember me" affordance may exist."""
+    js_dir = _FRONTEND
+    sources = [js_dir / f for f in ("api.js", "auth.js", "sse.js")]
+    sources += list(js_dir.glob("views/*.js"))
+    sources.append(js_dir.parent / "index.html")  # console shell
+    sources.append(js_dir.parent.parent / "index.html")  # landing
+    for src_path in sources:
+        src = src_path.read_text(encoding="utf-8")
+        assert "localStorage.getItem" not in src, src_path
+        assert "localStorage.setItem" not in src, src_path
+    console_html = (js_dir.parent / "index.html").read_text(encoding="utf-8")
+    assert "auth-remember" not in console_html
+
+
 def test_api_routes_not_shadowed() -> None:
     """API and health routes must resolve even with a `/` route mounted."""
     client = _client()

@@ -34,8 +34,9 @@ content** gathered by the Researcher agent.
 - **Sessions:** each JWT carries a unique `jti`; `POST /auth/logout`
   revokes it server-side (recorded until its own `exp`), so sign-out is
   real instead of waiting for token expiry. The console keeps the token
-  in `sessionStorage` by default — `localStorage` only when the operator
-  ticks "Remember me". API keys aren't sessions: revoke them via
+  in `sessionStorage` only — there is no `localStorage` opt-in — and
+  JWTs are short-lived (`JWT_EXPIRE_MINUTES`, default 30 min). API keys
+  aren't sessions: revoke them via
   `DELETE /workspaces/{id}/api-keys/{key_id}`.
 - **Content-Security-Policy:** per-surface — `/console` is strict
   self-only, the landing allows the Tailwind CDN and Google Fonts it

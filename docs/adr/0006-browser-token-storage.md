@@ -1,6 +1,7 @@
 # ADR 0006 — Browser token storage for the operator console
 
-**Status:** accepted · **Date:** 2026-10
+**Status:** accepted · **Date:** 2026-10 · amended 2026-10 (opt-in
+persistence removed, JWT lifetime shortened)
 
 ## Context
 
@@ -13,11 +14,17 @@ client-side, so a copied token stayed valid until `exp`.
 
 ## Decision
 
-**Session-scoped storage by default + opt-in persistence + real logout.**
+**Session-scoped storage only + real logout + short JWT lifetime.**
 
-- Tokens live in `sessionStorage` (cleared when the tab closes); the
-  "Remember me" checkbox in the sign-in modal opts into `localStorage`
-  for operators who want persistence.
+- Tokens live in `sessionStorage` (cleared when the tab closes). The
+  original decision shipped a "Remember me" checkbox that opted into
+  `localStorage`; on review the residual risk (an XSS-readable token
+  persisting past the operator's intent) outweighed the convenience, so
+  the opt-in was **removed** — `setToken` now only ever *clears*
+  `localStorage` so tokens persisted by older releases stop working.
+- JWT lifetime was shortened (`JWT_EXPIRE_MINUTES` default 60 → 30) to
+  bound the window a copied token stays usable — there is no refresh
+  token, so expiry is the primary containment.
 - Every JWT carries a unique `jti`; `POST /auth/logout` inserts it into
   `revoked_tokens` (keyed by `jti`, kept until its own `exp`), and
   `get_context` rejects revoked ids — sign-out is enforced server-side,
@@ -29,13 +36,16 @@ client-side, so a copied token stayed valid until `exp`.
 
 ## Consequences
 
-- **+** Closing the tab ends the session by default; a stolen token has a
-  server-side kill switch; "Remember me" makes the persistence trade an
-  explicit operator choice.
+- **+** Closing the tab ends the session, always; a stolen token has a
+  server-side kill switch *and* a short expiry.
 - **+** Revocation survives redeploys (SQLite row, not process memory).
-- **−** `sessionStorage`/`localStorage` are still reachable by injected
-  script — XSS on the origin is still token theft. Mitigated in depth by
-  the strict per-surface CSP (`/console` is self-only), not eliminated.
+- **−** `sessionStorage` is still reachable by injected script — XSS on
+  the origin is still token theft while the tab lives. Mitigated in
+  depth by the strict per-surface CSP (`/console` is self-only), not
+  eliminated.
+- **−** Operators re-authenticate after 30 idle minutes instead of
+  staying signed in across restarts — accepted trade for a
+  single-operator console.
 - **−** The revoked-token table grows until `exp` sweeps; bounded by
   `JWT_EXPIRE_MINUTES` × login rate — acceptable at this scale.
 
@@ -48,9 +58,9 @@ client-side, so a copied token stayed valid until `exp`.
   `orx_` keys), and buys little while the console CSP already denies
   third-party script. Revisit if the console ever serves user-generated
   markup.
-- **`localStorage` only** — the status quo ante: convenient, but every
-  session outlives the operator's intent and there was no server-side
-  revocation to shorten it.
+- **`localStorage` (opt-in or only)** — convenient persistence, but every
+  session outlives the operator's intent and the token stays
+  XSS-readable indefinitely.
 - **Refresh-token rotation** — correct at consumer-app scale, but adds a
   second credential type and rotation state for a single-operator console
   whose tokens last `JWT_EXPIRE_MINUTES` anyway.
