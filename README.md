@@ -480,8 +480,12 @@ entire suite with no secrets at all.
 docker compose up --build   # PORT=8001 docker compose up --build to remap
 ```
 
-The image is non-root, health-checked, and persists jobs + checkpoints to a
-named volume; `.env` is read at runtime — no secrets are baked in.
+The image is non-root (uid 10001), health-checked, digest-pinned
+(`python:3.13-slim@sha256:…`, bumped by Dependabot's docker ecosystem),
+and persists jobs + checkpoints to a named volume; `.env` is read at
+runtime — no secrets are baked in. Runtime stage carries no pip,
+setuptools or `__pycache__` (530 MB; compose adds `read_only`,
+`cap_drop: ALL`, `no-new-privileges`).
 
 ## ⚙️ Environment Variables
 
