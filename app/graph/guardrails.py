@@ -8,8 +8,10 @@ Three independent gates (OWASP LLM01/LLM02):
 3. ``screen_output`` — runs on the final report before it ships.
 """
 
+import html
 import re
 import unicodedata
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any
 
@@ -100,28 +102,79 @@ def _normalize(text: str) -> str:
     )
 
 
+def _decode_variants(text: str) -> list[str]:
+    """Bounded transport-decoded forms of ``text``, for screening only.
+
+    Attackers hide the whitespace the ``\\s`` patterns need inside encodings
+    (``ignore%20previous%20instructions``). Matching runs on the raw text
+    plus a small set of decoded variants — the text later sent to the model
+    is never rewritten. Work is capped: at most two decode rounds, each
+    round bounded by the input length (already limited to 10k chars).
+    """
+    seen = {text, text.replace("+", " ")}
+    frontier = list(seen)
+    for _ in range(2):  # a double-encoded payload needs the second round
+        nxt_round: list[str] = []
+        for variant in frontier:
+            for cand in (
+                urllib.parse.unquote(variant),
+                urllib.parse.unquote_plus(variant),
+                html.unescape(variant),
+            ):
+                if cand not in seen:
+                    seen.add(cand)
+                    nxt_round.append(cand)
+        if not nxt_round:
+            break
+        frontier = nxt_round
+    return list(seen)
+
+
+def _transport_decode(text: str) -> str:
+    """One bounded entity + percent decode, for untrusted content.
+
+    Used by ``sanitize_untrusted`` so an instruction hidden as
+    ``ignore%20previous%20instructions`` (or via HTML entities) is seen as
+    the instruction it is before the defang list runs. ``+`` is *not*
+    turned into a space here — in scraped text ``+`` is literal (``C++``,
+    "50+ customers"), not a query-string artifact.
+    """
+    text = html.unescape(text)
+    for _ in range(2):
+        decoded = urllib.parse.unquote(text)
+        if decoded == text:
+            break
+        text = decoded
+    return text
+
+
 def screen_input(text: str) -> GuardrailResult:
     """Screen raw user input. Blocked input never reaches the LLM."""
     if not text or not text.strip():
         return GuardrailResult(False, "empty input")
     if len(text) > 10_000:
         return GuardrailResult(False, "input exceeds 10k chars")
-    normalized = _normalize(text)
-    for pat in _INJECTION_PATTERNS:
-        m = pat.search(normalized)
-        if m:
-            return GuardrailResult(False, f"matched suspicious pattern: {pat.pattern}")
+    variants = [_normalize(v) for v in _decode_variants(text)]
+    for normalized in variants:
+        for pat in _INJECTION_PATTERNS:
+            m = pat.search(normalized)
+            if m:
+                return GuardrailResult(
+                    False, f"matched suspicious pattern: {pat.pattern}"
+                )
     return GuardrailResult(True)
 
 
 def sanitize_untrusted(text: str) -> str:
     """Neutralize scraped/parsed content before it reaches a prompt.
 
+    - decode transport encodings (percent/entities) so encoded instruction
+      payloads cannot evade the defang list,
     - normalize invisible/zero-width unicode,
     - defang embedded instruction phrases (replaced with a data marker),
     - collapse control characters.
     """
-    text = _normalize(text)
+    text = _normalize(_transport_decode(text))
     # Defang instruction-like phrases so they read as data, not commands.
     text = _INSTRUCTION_PHRASES.sub("[filtered]", text)
     return text.strip()

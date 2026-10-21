@@ -480,6 +480,7 @@ named volume; `.env` is read at runtime — no secrets are baked in.
 | `CACHE_ENABLED` / `CACHE_TTL_HOURS` | no | — | Search/scrape response cache (SQLite, per workspace+day) |
 | `REDIS_URL` | no | — | Enables Redis-backed rate limiter + event bus (multi-replica) |
 | `RATE_LIMIT_PER_MINUTE` | no | — | Sliding-window request cap per workspace |
+| `GUARDRAIL_LLM_SCREEN` | no | — | Optional model-based 2nd brief screen (one cheap `guardrail` call per accepted brief; never on the offline stub; fails open) |
 | `HITL_EXPIRY_HOURS` / `HITL_SWEEP_INTERVAL_SECONDS` | no | — | Stale `awaiting_review` expiry + sweep cadence |
 | `HUMAN_HOURS_PER_REPORT` / `HUMAN_HOURLY_USD` | no | — | Baseline for the human-vs-agent performance panel |
 | `PROMPT_PROMOTION_EPSILON` | no | — | Minimum measured delta for prompt promotion |

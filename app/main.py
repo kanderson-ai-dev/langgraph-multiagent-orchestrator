@@ -207,6 +207,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             llm_configured=settings.openai_api_key is not None,
             langsmith_tracing=tracing,
             tracing_provider=tracing_provider,
+            guardrail_llm_screen=settings.guardrail_llm_screen,
         )
         yield
         sweeper.cancel()
