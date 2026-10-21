@@ -531,7 +531,7 @@ setuptools or `__pycache__` (530 MB; compose adds `read_only`,
 | `RESEARCH_SCRAPE_TOP_K` | no | — | Sources scraped per sub-question |
 | `REVIEW_EARLY_EXIT_SCORE` / `REVIEWER_CITATION_SHORTCIRCUIT` | no | — | Skip/defer review work when deterministically decidable |
 | `CACHE_ENABLED` / `CACHE_TTL_HOURS` | no | — | Search/scrape response cache (per workspace+day) |
-| `STORAGE_BACKEND` / `DATABASE_URL` | no | `sqlite` | `postgres` swaps all six stores to a shared asyncpg pool (schemas auto-migrate; `docker-compose.postgres.yml` for the optional stack) |
+| `STORAGE_BACKEND` / `DATABASE_URL` | no | `sqlite` | `postgres` swaps all seven stores to Postgres (shared `asyncpg` pool + `psycopg` prompt-registry store; schemas auto-migrate; `docker-compose.postgres.yml` for the optional stack) |
 | `REDIS_URL` | no | — | Enables Redis-backed rate limiter + event bus (multi-replica) |
 | `RATE_LIMIT_PER_MINUTE` | no | — | Sliding-window request cap per workspace |
 | `GUARDRAIL_LLM_SCREEN` | no | — | Optional model-based 2nd brief screen (one cheap `guardrail` call per accepted brief; never on the offline stub; fails open) |
@@ -645,23 +645,23 @@ documented next step.
 
 ## Known limitations & next steps
 
-- **Live debate convergence is below target**: the first live A/B
-  (writer v3 + reviewer v2 vs promoted v1, same 7 briefs, 2026-10-18)
-  moved convergence from 0/7 to 2/7 ≈ 0.29 — still far under the 0.85
-  gate — and raised citation support only to ≈0.61 vs the 0.90
-  requirement, so nothing was promoted. The diagnosis (offline cassette
-  review + live runs) is that the gap is claim-level grounding under
+- **Live debate convergence is below target**: the re-measured live A/B
+  (writer v3 + reviewer v2 vs promoted v1, 2026-10-21) moved convergence
+  0/7 → 4/7 (0.571) and citation support 0.469 → 0.767 — still under the
+  0.85 / 0.90 gates, so the promotion gate correctly blocked it (record
+  persisted in `prompt_ab_runs`). The gap is claim-level grounding under
   real models, not routing: next step is another candidate round on the
   writer/reviewer pair via the registry's A/B gate.
-- **Live latency sits near (not under) the p50 target**: parallel search +
-  bounded-concurrency scraping brought wall-clock from 150–670s down to
-  ~105s for a full 3-round debate job. The remaining serial cost is the
-  Writer↔Reviewer debate itself — sequential by design — plus keyless
-  search latency; a paid provider (Tavily) would shave the research phase
-  further.
+- **Live latency clears the p50 gate**: `latency_bench` measured p50
+  76.7s / p95 78.9s on 2026-10-21 (gate: 90s/240s) — converged runs land
+  well under; HITL-paused jobs measure active segments. The remaining
+  serial cost is the Writer↔Reviewer debate itself — sequential by
+  design — plus keyless search latency; a paid provider (Tavily) would
+  shave the research phase further.
 - The default SQLite stores run WAL + a 5 s busy timeout
   (concurrency-tested — see ADR 0003) but remain single-node,
-  single-writer. `STORAGE_BACKEND=postgres` switches all six stores to
+  single-writer. `STORAGE_BACKEND=postgres` switches all seven stores
+  (incl. the prompt-registry overlay) to
   Postgres for multi-replica deployments (optional
   `docker-compose.postgres.yml`; contract-tested in CI); the LangGraph
   checkpointer is still SQLite-only either way — resume state stays
