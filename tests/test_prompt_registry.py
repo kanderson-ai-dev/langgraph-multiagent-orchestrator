@@ -312,3 +312,51 @@ def test_overrides_view_pins_versions(tmp_path: Path) -> None:
 
 def test_prompts_dir_constant_points_at_repo() -> None:
     assert (DEFAULT_PROMPTS_DIR / "writer" / "v1.yaml").is_file()
+
+
+def test_two_instances_share_one_overlay(tmp_path: Path) -> None:
+    """Two live registries over the same DB behave like two processes:
+    a candidate created through A is visible in B after the refresh
+    read; a promotion (and a rollback) propagates the same way."""
+    db = str(tmp_path / "reg.sqlite")
+    reg_a = PromptRegistry.load(db_path=db)
+    reg_b = PromptRegistry.load(db_path=db)
+
+    # A creates a candidate; B sees it on its next read (revision bump).
+    cand = reg_a.create_candidate("writer", "two-proc body\n", "host A")
+    assert cand.version == 2
+    assert reg_b.get("writer", 2).template == "two-proc body\n"
+    assert reg_b.get("writer", 2).status == PromptStatus.CANDIDATE
+
+    # A promotes it; B's promoted pointer follows.
+    reg_a.promote("writer", 2, actor="a", reason="shipped")
+    assert reg_b.get("writer").version == 2
+    assert reg_b.get("writer", 1).status == PromptStatus.RETIRED
+
+    # A rolls back; B sees the restoration too.
+    reg_a.rollback("writer", 1, actor="a", reason="regression")
+    assert reg_b.get("writer").version == 1
+    assert reg_b.get("writer", 2).status == PromptStatus.ROLLED_BACK
+
+    # The lifecycle chain is shared and still verifies on both sides.
+    valid_a, root_a, _ = reg_a.verify_audit_chain()
+    valid_b, root_b, _ = reg_b.verify_audit_chain()
+    assert valid_a and valid_b and root_a == root_b
+
+
+def test_prompt_store_protocol_any_backend(tmp_path: Path) -> None:
+    """A registry built on an explicit store behaves identically to the
+    ``db_path`` shorthand (the seam all backends implement)."""
+    from app.services.prompt_store import SqlitePromptStore
+
+    store = SqlitePromptStore(str(tmp_path / "reg.sqlite"))
+    reg = PromptRegistry.load(store=store)
+    assert reg.get("writer").version == 1
+    cand = reg.create_candidate("writer", "store body\n", "via store")
+    assert cand.status == PromptStatus.CANDIDATE
+    reg.promote("writer", 2, actor="t")
+    assert reg.get("writer").version == 2
+    reg.__exit__()
+    # Second registry on a fresh store over the same DB sees it.
+    reg2 = PromptRegistry.load(store=SqlitePromptStore(str(tmp_path / "reg.sqlite")))
+    assert reg2.get("writer").version == 2

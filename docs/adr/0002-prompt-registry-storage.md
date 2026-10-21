@@ -38,3 +38,14 @@ source of truth.
   regressing prompt is blocked unless an admin supplies an override reason.
 - **−** Two stores to keep consistent (files vs DB) — handled by
   idempotent seeding + the DB owning mutable lifecycle state.
+
+## Amendment — overlay behind `PromptStoreProtocol` (Phase 12)
+
+The registry no longer owns a `sqlite3` connection: it reads and writes
+through `app/services/prompt_store.py` (`PromptStoreProtocol` —
+`SqlitePromptStore` default, `PgPromptStore` on `psycopg` under
+`STORAGE_BACKEND=postgres`). The lifecycle semantics are unchanged — YAML
+seeds still win template bytes, the DB still owns status and A/B runs —
+but the overlay is now a pluggable store: on Postgres the same
+revision-bump re-merge means a `promote` on replica A is observed by
+replica B on its next read, closing the single-host gap W7 flagged.

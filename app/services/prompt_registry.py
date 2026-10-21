@@ -3,9 +3,10 @@
 Prompts are data, not code: each agent's system prompt lives in
 ``prompts/<name>/v<N>.yaml`` (git-reviewed seed files), loaded and validated
 at startup. Mutable lifecycle state — runtime-created candidates, status
-transitions — is persisted as a SQLite overlay on top of the YAML seeds,
-so promotions survive restarts while the files remain the source of truth
-for template content.
+transitions — is persisted as a DB overlay on top of the YAML seeds
+(any ``PromptStoreProtocol`` backend: SQLite default, Postgres for
+multi-host), so promotions survive restarts while the files remain the
+source of truth for template content.
 
 Invariants enforced at load (violations fail fast — the app never silently
 falls back to stale constants):
@@ -26,7 +27,6 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
-import sqlite3
 import string
 import threading
 from collections.abc import Sequence
@@ -39,6 +39,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from app.services.audit import GENESIS
+from app.services.prompt_store import PromptStoreProtocol, SqlitePromptStore
 
 DEFAULT_PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
 
@@ -84,45 +85,7 @@ class RenderedPrompt(BaseModel):
     sha256: str
 
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS prompt_versions (
-    name              TEXT NOT NULL,
-    version           INTEGER NOT NULL,
-    status            TEXT NOT NULL,
-    author            TEXT NOT NULL DEFAULT '',
-    created_at        TEXT NOT NULL,
-    target_model      TEXT NOT NULL DEFAULT '',
-    variables         TEXT NOT NULL DEFAULT '[]',
-    changelog         TEXT NOT NULL DEFAULT '',
-    template          TEXT NOT NULL,
-    sha256            TEXT NOT NULL DEFAULT '',
-    source            TEXT NOT NULL DEFAULT 'yaml',
-    status_overridden INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (name, version)
-);
-CREATE TABLE IF NOT EXISTS prompt_events (
-    seq          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name         TEXT NOT NULL,
-    version      INTEGER NOT NULL,
-    action       TEXT NOT NULL,
-    actor        TEXT NOT NULL DEFAULT '',
-    reason       TEXT NOT NULL DEFAULT '',
-    metrics_json TEXT NOT NULL DEFAULT '{}',
-    prev_hash    TEXT NOT NULL,
-    hash         TEXT NOT NULL,
-    sig          TEXT NOT NULL DEFAULT '',
-    created_at   TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS prompt_ab_runs (
-    run_id       TEXT PRIMARY KEY,
-    name         TEXT NOT NULL,
-    version      INTEGER NOT NULL,
-    workspace_id TEXT NOT NULL DEFAULT '',
-    status       TEXT NOT NULL,
-    result_json  TEXT NOT NULL DEFAULT '{}',
-    created_at   TEXT NOT NULL
-);
-"""
+
 
 
 def _placeholders(template: str) -> set[str]:
@@ -143,12 +106,12 @@ def _event_canonical(event: dict[str, Any]) -> str:
 
 
 class PromptRegistry:
-    """Read API + lifecycle mutations over YAML seeds and a SQLite overlay."""
+    """Read API + lifecycle mutations over YAML seeds and a store overlay."""
 
     def __init__(
         self,
         versions: dict[tuple[str, int], PromptVersion],
-        conn: sqlite3.Connection | None,
+        store: PromptStoreProtocol | None,
         *,
         promoted_overrides: dict[str, int] | None = None,
         yaml_versions: dict[tuple[str, int], PromptVersion] | None = None,
@@ -156,7 +119,7 @@ class PromptRegistry:
         previous_keys: Sequence[str] = (),
     ) -> None:
         self._versions = versions
-        self._conn = conn
+        self._store = store
         self._signing_key = signing_key
         # Verification keyring {key_id: key}: current key first, then
         # retired keys — signatures minted pre-rotation stay verifiable.
@@ -184,9 +147,12 @@ class PromptRegistry:
         db_path: str | None = None,
         signing_key: str | None = None,
         previous_keys: Sequence[str] = (),
+        store: PromptStoreProtocol | None = None,
     ) -> PromptRegistry:
-        """Load YAML seeds (+ SQLite overlay when ``db_path`` is given).
+        """Load YAML seeds plus the DB overlay.
 
+        ``db_path`` keeps the historical shorthand (SQLite overlay);
+        ``store`` injects another backend and wins when both are given.
         Raises ``PromptRegistryError`` on any invalid artifact — callers let
         it propagate so the process fails fast at startup.
         """
@@ -195,17 +161,18 @@ class PromptRegistry:
             raise PromptRegistryError(f"prompts directory missing: {prompts_dir}")
         versions = cls._load_yaml(prompts_dir)
 
-        conn: sqlite3.Connection | None = None
+        if store is None and db_path is not None:
+            store = SqlitePromptStore(db_path)
         yaml_versions = versions
-        if db_path is not None:
-            conn = cls._open_db(db_path)
-            cls._sync_yaml(conn, versions)
-            versions = cls._merge_db(conn, versions)
+        if store is not None:
+            store.migrate()
+            cls._sync_yaml(store, versions)
+            versions = cls._merge_db(store, versions)
 
         cls._validate(versions)
         return cls(
             versions,
-            conn,
+            store,
             yaml_versions=yaml_versions,
             signing_key=signing_key,
             previous_keys=previous_keys,
@@ -246,24 +213,9 @@ class PromptRegistry:
         return versions
 
     @staticmethod
-    def _open_db(db_path: str) -> sqlite3.Connection:
-        from app.services.sqlite_util import connect_sync
-
-        conn = connect_sync(db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.executescript(_SCHEMA)
-        # Guarded migration: older DBs lack the per-event HMAC column.
-        cols = {r["name"] for r in conn.execute("PRAGMA table_info(prompt_events)")}
-        if "sig" not in cols:
-            conn.execute(
-                "ALTER TABLE prompt_events ADD COLUMN sig TEXT NOT NULL DEFAULT ''"
-            )
-            conn.commit()
-        return conn
-
-    @staticmethod
     def _sync_yaml(
-        conn: sqlite3.Connection, versions: dict[tuple[str, int], PromptVersion]
+        store: PromptStoreProtocol,
+        versions: dict[tuple[str, int], PromptVersion],
     ) -> None:
         """Upsert seed content; runtime status overrides always win.
 
@@ -274,11 +226,7 @@ class PromptRegistry:
         of silently shadowing one.
         """
         for pv in versions.values():
-            row = conn.execute(
-                "SELECT sha256, source FROM prompt_versions"
-                " WHERE name=? AND version=?",
-                (pv.name, pv.version),
-            ).fetchone()
+            row = store.version_row(pv.name, pv.version)
             if row is not None and row["source"] == "runtime":
                 existing = row["sha256"]
                 if existing != pv.sha256:
@@ -288,37 +236,19 @@ class PromptRegistry:
                         "hash). Delete the DB row or rename the file — "
                         "refusing to pick one silently."
                     )
-            conn.execute(
-                "INSERT INTO prompt_versions (name, version, status, author,"
-                " created_at, target_model, variables, changelog, template,"
-                " sha256, source, status_overridden)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,'yaml',0)"
-                " ON CONFLICT(name, version) DO UPDATE SET"
-                "   author=excluded.author, created_at=excluded.created_at,"
-                "   target_model=excluded.target_model,"
-                "   variables=excluded.variables, changelog=excluded.changelog,"
-                "   template=excluded.template, sha256=excluded.sha256,"
-                "   source='yaml',"
-                "   status=CASE WHEN prompt_versions.status_overridden=1"
-                "     THEN prompt_versions.status ELSE excluded.status END",
-                (
-                    pv.name, pv.version, pv.status.value, pv.author,
-                    pv.created_at.isoformat(), pv.target_model,
-                    json.dumps(pv.variables), pv.changelog, pv.template,
-                    pv.sha256,
-                ),
+            store.upsert_version(
+                pv, source="yaml", status_overridden=0,
+                preserve_overridden_status=True,
             )
-        conn.commit()
 
     @staticmethod
     def _merge_db(
-        conn: sqlite3.Connection, yaml_versions: dict[tuple[str, int], PromptVersion]
+        store: PromptStoreProtocol,
+        yaml_versions: dict[tuple[str, int], PromptVersion],
     ) -> dict[tuple[str, int], PromptVersion]:
         """Effective view = YAML content, DB-overlaid status, + runtime rows."""
         merged = dict(yaml_versions)
-        rows = conn.execute(
-            "SELECT * FROM prompt_versions ORDER BY name, version"
-        ).fetchall()
+        rows = store.fetch_versions()
         for row in rows:
             key = (row["name"], row["version"])
             db_status = PromptStatus(row["status"])
@@ -378,12 +308,9 @@ class PromptRegistry:
 
     def _db_revision(self) -> int:
         """Monotonic registry revision — MAX(seq) of the lifecycle chain."""
-        if self._conn is None:
+        if self._store is None:
             return -1
-        row = self._conn.execute(
-            "SELECT MAX(seq) AS s FROM prompt_events"
-        ).fetchone()
-        return int(row["s"] or 0)
+        return self._store.revision()
 
     def _maybe_refresh(self) -> None:
         """Re-merge the DB overlay when another process appended events.
@@ -392,13 +319,15 @@ class PromptRegistry:
         the two the stored revision stays stale and the next read merges
         again (self-healing, never serves older data than the check).
         """
-        if self._conn is None:
+        if self._store is None:
             return
         rev = self._db_revision()
         if rev == self._revision:
             return
         with self._lock:
-            self._versions = self._merge_db(self._conn, dict(self._yaml_versions))
+            self._versions = self._merge_db(
+                self._store, dict(self._yaml_versions)
+            )
             self._revision = rev
 
     # ── read API ─────────────────────────────────────────────────────────
@@ -498,29 +427,18 @@ class PromptRegistry:
 
     # ── mutations (DB-backed) ────────────────────────────────────────────
 
-    def _require_db(self) -> sqlite3.Connection:
-        if self._conn is None:
+    def _require_store(self) -> PromptStoreProtocol:
+        if self._store is None:
             raise PromptRegistryError("registry is read-only (no database)")
-        return self._conn
+        return self._store
 
     def _persist(self, pv: PromptVersion, *, status_overridden: bool) -> None:
-        conn = self._require_db()
-        conn.execute(
-            "INSERT INTO prompt_versions (name, version, status, author,"
-            " created_at, target_model, variables, changelog, template,"
-            " sha256, source, status_overridden)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
-            " ON CONFLICT(name, version) DO UPDATE SET"
-            "   status=excluded.status,"
-            "   status_overridden=excluded.status_overridden",
-            (
-                pv.name, pv.version, pv.status.value, pv.author,
-                pv.created_at.isoformat(), pv.target_model,
-                json.dumps(pv.variables), pv.changelog, pv.template,
-                pv.sha256, pv.source, 1 if status_overridden else 0,
-            ),
+        self._require_store().upsert_version(
+            pv,
+            source=pv.source,
+            status_overridden=1 if status_overridden else 0,
+            preserve_overridden_status=False,
         )
-        conn.commit()
 
     def _set_status(self, pv: PromptVersion, status: PromptStatus) -> None:
         pv.status = status
@@ -551,12 +469,9 @@ class PromptRegistry:
         metrics: dict[str, Any] | None,
     ) -> str:
         """Append to the prompt-lifecycle hash chain; returns the entry hash."""
-        conn = self._require_db()
+        store = self._require_store()
         now = datetime.now(UTC).isoformat()
-        prev = conn.execute(
-            "SELECT hash FROM prompt_events ORDER BY seq DESC LIMIT 1"
-        ).fetchone()
-        prev_hash = str(prev["hash"]) if prev else GENESIS
+        prev_hash = store.last_event_hash() or GENESIS
         payload = {
             "name": name, "version": version, "action": action,
             "actor": actor, "reason": reason,
@@ -567,17 +482,15 @@ class PromptRegistry:
             f"{prev_hash}|{_event_canonical(payload)}".encode()
         ).hexdigest()
         sig = self._sign(digest)
-        conn.execute(
-            "INSERT INTO prompt_events (name, version, action, actor, reason,"
-            " metrics_json, prev_hash, hash, sig, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (
-                name, version, action, actor, reason,
-                json.dumps(metrics or {}, sort_keys=True),
-                prev_hash, digest, sig, now,
-            ),
+        store.record_event(
+            {
+                "name": name, "version": version, "action": action,
+                "actor": actor, "reason": reason,
+                "metrics_json": json.dumps(metrics or {}, sort_keys=True),
+                "prev_hash": prev_hash, "hash": digest, "sig": sig,
+                "created_at": now,
+            }
         )
-        conn.commit()
         # Own writes bump the revision so the next read doesn't re-merge.
         self._revision = self._db_revision()
         return digest
@@ -667,11 +580,7 @@ class PromptRegistry:
     # ── lifecycle audit chain ────────────────────────────────────────────
 
     def audit_events(self) -> list[dict[str, Any]]:
-        conn = self._require_db()
-        rows = conn.execute(
-            "SELECT * FROM prompt_events ORDER BY seq"
-        ).fetchall()
-        return [dict(r) for r in rows]
+        return self._require_store().events()
 
     def verify_audit_chain(
         self,
@@ -740,37 +649,28 @@ class PromptRegistry:
         result: dict[str, Any],
     ) -> bool:
         """Upsert an A/B run record; no-ops (returns False) without a DB."""
-        conn = self._conn
-        if conn is None:
+        if self._store is None:
             return False
-        conn.execute(
-            "INSERT INTO prompt_ab_runs"
-            " (run_id, name, version, workspace_id, status, result_json,"
-            "  created_at) VALUES (?,?,?,?,?,?,?)"
-            " ON CONFLICT(run_id) DO UPDATE SET"
-            "   status=excluded.status, result_json=excluded.result_json",
-            (
-                run_id, name, version, workspace_id,
-                str(result.get("status", "running")),
-                json.dumps(result, sort_keys=True),
-                str(result.get("created_at") or datetime.now(UTC).isoformat()),
+        self._store.save_ab_run(
+            run_id,
+            name=name,
+            version=version,
+            workspace_id=workspace_id,
+            status=str(result.get("status", "running")),
+            result_json=json.dumps(result, sort_keys=True),
+            created_at=str(
+                result.get("created_at") or datetime.now(UTC).isoformat()
             ),
         )
-        conn.commit()
         return True
 
     def get_ab_run(
         self, run_id: str, workspace_id: str
     ) -> dict[str, Any] | None:
         """Fetch a persisted A/B run scoped to ``workspace_id``."""
-        conn = self._conn
-        if conn is None:
+        if self._store is None:
             return None
-        row = conn.execute(
-            "SELECT * FROM prompt_ab_runs"
-            " WHERE run_id = ? AND workspace_id = ?",
-            (run_id, workspace_id),
-        ).fetchone()
+        row = self._store.get_ab_run(run_id, workspace_id)
         if row is None:
             return None
         result: dict[str, Any] = json.loads(row["result_json"])
@@ -797,5 +697,5 @@ class PromptRegistry:
         return self
 
     def __exit__(self, *exc: object) -> None:
-        if self._conn is not None:
-            self._conn.close()
+        if self._store is not None:
+            self._store.close()

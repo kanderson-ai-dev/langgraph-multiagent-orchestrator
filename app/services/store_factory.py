@@ -22,6 +22,7 @@ from app.core.config import Settings
 from app.services.cache_store import CacheStore
 from app.services.feedback_store import FeedbackStore
 from app.services.job_store import JobStore
+from app.services.prompt_store import PromptStoreProtocol, SqlitePromptStore
 from app.services.token_store import SqliteTokenStore, TokenStore
 from app.services.usage_store import UsageStore
 from app.services.workspace_store import WorkspaceStore
@@ -46,6 +47,7 @@ class AppStores:
     feedback_store: FeedbackStoreProtocol
     token_store: TokenStore
     cache_store: CacheStoreProtocol | None
+    prompt_store: PromptStoreProtocol
 
 
 def build_stores(settings: Settings) -> AppStores:
@@ -60,6 +62,7 @@ def build_stores(settings: Settings) -> AppStores:
             feedback_store=FeedbackStore(path),
             token_store=SqliteTokenStore(path),
             cache_store=CacheStore(path) if settings.cache_enabled else None,
+            prompt_store=SqlitePromptStore(path),
         )
     if backend == "postgres":
         if settings.database_url is None:
@@ -75,6 +78,8 @@ def build_stores(settings: Settings) -> AppStores:
             raise RuntimeError(msg) from exc
         dsn = settings.database_url.get_secret_value()
         pg = PostgresStores(dsn)
+        from app.services.pg.prompt_store import PgPromptStore
+
         return AppStores(
             job_store=pg.job_store,
             usage_store=pg.usage_store,
@@ -82,6 +87,7 @@ def build_stores(settings: Settings) -> AppStores:
             feedback_store=pg.feedback_store,
             token_store=pg.token_store,
             cache_store=pg.cache_store if settings.cache_enabled else None,
+            prompt_store=PgPromptStore(dsn),
         )
     msg = f"unknown storage_backend: {backend!r} (expected 'sqlite' or 'postgres')"
     raise RuntimeError(msg)

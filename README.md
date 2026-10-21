@@ -145,8 +145,9 @@ graph TD
 ## 🧬 Prompt Registry
 
 Prompts are versioned artifacts, not string literals buried in nodes.
-`prompts/<name>/vN.yaml` seeds load idempotently into a SQLite-backed
-registry that owns the lifecycle:
+`prompts/<name>/vN.yaml` seeds load idempotently into a registry
+(`PromptStoreProtocol` — SQLite by default, Postgres via
+`STORAGE_BACKEND=postgres`) that owns the lifecycle:
 
 ```
 seed → draft → candidate ──ab-test──▶ promoted ──▶ retired
@@ -604,14 +605,17 @@ docker compose -f docker-compose.yml -f docker-compose.override.yml up
 
 Both backends pass the same parametrized contract test suite — CI uses
 `fakeredis`, never a real Redis. Other shared state: the prompt registry
-re-reads its SQLite overlay whenever the lifecycle chain grows (a promote
-in one process is visible in another sharing the file — single host only),
-A/B run records persist in `prompt_ab_runs` so they survive restarts, and
-the runner frees per-job dicts at terminal states. For true multi-replica
-state, `STORAGE_BACKEND=postgres` + `DATABASE_URL` swaps all six stores
-to a shared `asyncpg` pool (`app/services/pg/`); the same contract suite
-runs against both backends, and the LangGraph checkpointer stays on its
-own path (`CHECKPOINT_DB_PATH`) either way — a Postgres saver is the
+re-reads its overlay whenever the lifecycle chain grows (a promote in one
+process is visible in another sharing the store — with SQLite that is a
+file, single host only; with `STORAGE_BACKEND=postgres` the overlay is
+shared across replicas), A/B run records persist in `prompt_ab_runs` so
+they survive restarts, and the runner frees per-job dicts at terminal
+states. For true multi-replica state, `STORAGE_BACKEND=postgres` +
+`DATABASE_URL` swaps all seven stores — six `asyncpg` pools plus the
+synchronous prompt-registry store on `psycopg`
+(`app/services/pg/`, `app/services/prompt_store.py`); the same contract
+suite runs against both backends, and the LangGraph checkpointer stays on
+its own path (`CHECKPOINT_DB_PATH`) either way — a Postgres saver is the
 documented next step.
 
 ## Known limitations & next steps

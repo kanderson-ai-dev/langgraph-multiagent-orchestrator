@@ -423,3 +423,51 @@ def test_factory_postgres_constructs_lazily(tmp_path: Any) -> None:
     )
     assert type(stores.job_store).__name__ == "PgJobStore"
     assert type(stores.token_store).__name__ == "PgTokenStore"
+
+
+# ─── prompt registry store (sync seam, Phase 12) ────────────────────────────
+
+
+@pytest.fixture(params=_backends())
+def prompt_store(
+    request: pytest.FixtureRequest, tmp_path: Any
+) -> Any:
+    if request.param == "sqlite":
+        from app.services.prompt_store import SqlitePromptStore
+
+        yield SqlitePromptStore(str(tmp_path / "reg.sqlite"))
+        return
+    from app.services.pg.prompt_store import PgPromptStore
+
+    store = PgPromptStore(os.environ["TEST_DATABASE_URL"])
+    yield store
+    store.close()
+
+
+def test_prompt_registry_on_store_backend(prompt_store: Any, ws: Any) -> None:
+    """The full registry lifecycle through the injected store — same
+    semantics either backend (candidates, promote, rollback, chain, A/B)."""
+    from app.services.prompt_registry import (
+        PromptRegistry,
+        PromptStatus,
+    )
+
+    reg = PromptRegistry.load(store=prompt_store)
+    assert reg.get("writer").version == 1
+    cand = reg.create_candidate("writer", "pg body\n", "on store")
+    assert cand.status == PromptStatus.CANDIDATE
+    reg.promote("writer", 2, actor="t")
+    assert reg.get("writer").version == 2
+    reg.rollback("writer", 1, actor="t", reason="x")
+    assert reg.get("writer").version == 1
+    valid, _root, entries = reg.verify_audit_chain()
+    assert valid and len(entries) >= 3
+    # A/B run record, scoped.
+    assert reg.save_ab_run(
+        f"run-{ws.a}", name="writer", version=1,
+        workspace_id=ws.a,
+        result={"status": "done", "x": 1},
+    )
+    got = reg.get_ab_run(f"run-{ws.a}", ws.a)
+    assert got is not None and got["status"] == "done"
+    assert reg.get_ab_run(f"run-{ws.a}", ws.b) is None

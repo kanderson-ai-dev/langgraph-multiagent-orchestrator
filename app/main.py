@@ -108,7 +108,7 @@ def build_runner(
     )
     prompts = PromptRegistry.load(
         DEFAULT_PROMPTS_DIR,
-        db_path=settings.database_path,
+        store=stores.prompt_store,
         signing_key=(
             settings.audit_signing_key.get_secret_value()
             if settings.audit_signing_key

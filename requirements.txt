@@ -257,6 +257,10 @@ protobuf==7.36.2
     # via
     #   googleapis-common-protos
     #   opentelemetry-proto
+psycopg==3.3.6
+    # via langgraph-multiagent-orchestrator
+psycopg-binary==3.3.6 ; implementation_name != 'pypy'
+    # via psycopg
 py-serializable==2.1.0
     # via cyclonedx-python-lib
 pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
@@ -390,6 +394,7 @@ typing-extensions==4.16.0
     #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
+    #   psycopg
     #   pydantic
     #   pydantic-core
     #   pyee
@@ -402,6 +407,8 @@ typing-inspection==0.4.4
     #   fastapi
     #   pydantic
     #   pydantic-settings
+tzdata==2026.5 ; sys_platform == 'win32'
+    # via psycopg
 urllib3==2.8.0
     # via requests
 uuid-utils==0.17.1
