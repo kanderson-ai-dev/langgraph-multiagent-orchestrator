@@ -139,6 +139,11 @@ real scraped HTML and LLM payloads. Before a cassette is committed:
   opt-in).
 - Audit signatures authenticate the chain tip against **DB-only** attackers.
   An attacker who also steals `AUDIT_SIGNING_KEY` can forge signatures — the
-  key must live outside the DB (env/secret manager). There is no key
-  rotation (`AUDIT_SIGNING_KEY_ID`) and no external timestamping/anchoring —
-  recorded as next steps.
+  key must live outside the DB (env/secret manager). Signatures carry a
+  non-secret `key_id` and verify against a rotation ring
+  (`AUDIT_SIGNING_PREVIOUS_KEYS` — retired keys verify but never sign). A
+  local append-only anchor log (`AUDIT_ANCHOR_PATH`) preserves each sealed
+  `job_id → audit_root` outside the jobs DB, so a wholesale rewrite is
+  detectable (`scripts/audit_anchor.py --check`). Still open: third-party
+  timestamping (RFC 3161 TSA / OpenTimestamps) over the anchor root —
+  recorded as a next step.

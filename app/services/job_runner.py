@@ -331,6 +331,26 @@ class JobRunner:
             return sign_root(
                 signing_key, root, job_id=job_id, workspace_id=workspace_id
             )
+
+        def _anchor(root: Any, signature: str | None) -> None:
+            """Append to the local anchor log — best-effort: a write
+            failure must not fail a finished job."""
+            if not isinstance(root, str) or not root:
+                return
+            try:
+                from app.services.audit_anchor import append_anchor
+
+                append_anchor(
+                    self._settings.audit_anchor_path,
+                    job_id=job_id,
+                    workspace_id=workspace_id,
+                    audit_root=root,
+                    audit_signature=signature,
+                )
+            except Exception:
+                logger.warning(
+                    "audit_anchor_write_failed", job_id=job_id, exc_info=True
+                )
         # Job-level latency (active segment — HITL pauses excluded).
         elapsed = time.monotonic() - started
         from app.core.latency import LATENCY
@@ -343,13 +363,14 @@ class JobRunner:
             from app.services.audit import chain_transcript
 
             audit_root = values.get("audit_root")
+            signature = _sig(audit_root)
             await self._jobs.set_result(
                 workspace_id,
                 job_id,
                 {
                     "report": values.get("final_report"),
                     "audit_root": audit_root,
-                    "audit_signature": _sig(audit_root),
+                    "audit_signature": signature,
                     "audit_entries": [
                         e.model_dump() for e in chain_transcript(transcript)
                     ],
@@ -365,6 +386,7 @@ class JobRunner:
                 cost_usd=cost,
                 status="done",
             )
+            _anchor(audit_root, signature)
         elif status == "awaiting_review":
             # Persist why it escalated — the console/poll shows the real
             # cause plus the legal actions for this pause.
@@ -395,6 +417,7 @@ class JobRunner:
             # The report assembler never ran, so seal the chain tip
             # here — the audit endpoint can still verify.
             audit_root = values.get("audit_root") or root_of(transcript)
+            signature = _sig(audit_root)
             await self._jobs.set_result(
                 workspace_id,
                 job_id,
@@ -403,7 +426,7 @@ class JobRunner:
                     "rejection_reason": values.get("rejection_reason"),
                     "errors": [str(e) for e in values.get("errors", [])],
                     "audit_root": audit_root,
-                    "audit_signature": _sig(audit_root),
+                    "audit_signature": signature,
                     "audit_entries": [
                         e.model_dump() for e in chain_transcript(transcript)
                     ],
@@ -416,6 +439,7 @@ class JobRunner:
                 cost_usd=cost,
                 status=status,  # type: ignore[arg-type]
             )
+            _anchor(audit_root, signature)
         # Awaiting review is a pause, not a terminal state — keep the SSE
         # stream open so subscribers see events after the resume, and keep
         # the process-local state (last values for the checkpoint fallback,

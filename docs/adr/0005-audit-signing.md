@@ -44,6 +44,7 @@ tampering is invisible.
   `kid → key` map) and no external timestamping/anchoring — a chain can
   be replaced wholesale by anyone holding the key. Recorded as next steps
   in SECURITY.md "Known limitations".
+  *(Superseded — see Amendment below.)*
 
 ## Alternatives rejected
 
@@ -58,3 +59,33 @@ tampering is invisible.
 - **Asymmetric signatures** — lets verifiers run without the secret, but
   this service is both signer and verifier; a second key type buys
   nothing until a third-party verifier exists.
+
+## Amendment — key ids, rotation, and a local anchor (delivered)
+
+**Status:** accepted · **Date:** 2026-11
+
+The two "no rotation / no anchoring" limitations above are now closed:
+
+- **Key ids.** `sign_root` emits `key_id:hmac` where `key_id` is the first
+  8 hex of `sha256(key)` — non-secret, stored beside the signature. The
+  same format signs prompt-lifecycle events.
+- **Rotation.** `AUDIT_SIGNING_PREVIOUS_KEYS` (comma-separated, env-only)
+  builds a `key_id → key` verification ring: only `AUDIT_SIGNING_KEY`
+  mints new signatures, retired keys still verify old ones. An unknown
+  `key_id` yields `signature_valid: false` — a clean failure, never an
+  exception. Legacy prefix-free signatures are tried against every ring
+  key for backward compatibility.
+- **Local anchor.** Each sealed job appends one JSONL line
+  (`AUDIT_ANCHOR_PATH`, default `data/audit_anchor.jsonl`) binding
+  `job_id → audit_root`. The file is independent of the jobs DB —
+  copyable off-box — and `GET /reports/{id}/audit` reports
+  `anchor_match` (`true`/`false`/`null` when the job predates the log).
+  `scripts/audit_anchor.py` prints the latest root for owner publication
+  (Git tag, transparency log) and `--check` diffs every anchor against
+  the DB.
+- **Honest unsigned.** `signature_valid: null` renders "unsigned" on the
+  console badges and the PDF/DOCX footer — never implied-valid.
+
+Still open: real third-party timestamping (RFC 3161 TSA / OpenTimestamps)
+over the anchor root — the anchor file is the stable artifact a TSA would
+stamp. Recorded as the next step in SECURITY.md.

@@ -65,7 +65,11 @@ the standard of a paid engagement, not a portfolio toy.
   hash chain; the report carries its `audit_root`, and
   `GET /reports/{id}/audit` lets anyone re-verify the chain. Set
   `AUDIT_SIGNING_KEY` and the chain tip is HMAC-signed — a DB-only
-  attacker can recompute hashes but not the MAC
+  attacker can recompute hashes but not the MAC. Signatures carry a
+  non-secret `key_id`; retired keys (`AUDIT_SIGNING_PREVIOUS_KEYS`) keep
+  verifying after a rotation. Every sealed job also appends to a local
+  append-only anchor log (`AUDIT_ANCHOR_PATH`) — a rewrite of the jobs DB
+  no longer matches the preserved root
   ([ADR 0005](docs/adr/0005-audit-signing.md)).
 - 🧑‍⚖️ **Honest human-in-the-loop.** A real LangGraph `interrupt()` on a
   SQLite checkpointer — jobs pause at `awaiting_review`, survive restarts,
@@ -178,7 +182,13 @@ Two chains make "who said what, backed by what" cryptographic:
 
 `GET /reports/{id}/audit` re-verifies the chain server-side; a tampered
 record flips `verified` to `false` (proven by test). `/evidence` exposes
-the sealed manifest.
+the sealed manifest. The response also reports `signature_key_id` (which
+ring key minted the signature) and `anchor_match` — whether the stored
+root still equals the append-only anchor log's preserved copy.
+`uv run python scripts/audit_anchor.py latest` prints the newest anchor
+for off-box publication; `--check` diffs every anchor against the jobs DB.
+Deployments without `AUDIT_SIGNING_KEY` render an explicit **unsigned**
+badge in the console and report exports — never an implied-valid one.
 
 ## 🛂 RBAC & workspaces
 
