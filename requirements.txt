@@ -153,7 +153,7 @@ langgraph-checkpoint==4.2.0
     #   langgraph-prebuilt
 langgraph-checkpoint-sqlite==3.1.1
     # via langgraph-multiagent-orchestrator
-langgraph-prebuilt==1.1.0
+langgraph-prebuilt==1.1.1
     # via langgraph
 langgraph-sdk==0.4.5
     # via langgraph
