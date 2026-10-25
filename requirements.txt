@@ -134,7 +134,7 @@ langchain-core==1.6.10
     #   langgraph-multiagent-orchestrator
     #   langgraph-prebuilt
     #   langgraph-sdk
-langchain-openai==1.6.6
+langchain-openai==1.7.2
     # via langgraph-multiagent-orchestrator
 langchain-protocol==0.0.19
     # via
