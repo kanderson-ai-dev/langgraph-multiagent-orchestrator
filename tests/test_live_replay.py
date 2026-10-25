@@ -87,6 +87,13 @@ async def test_recorded_case_replays_offline(
         return ["93.184.216.34"]
 
     monkeypatch.setattr(ScraperClient, "_resolve_addresses", _fake_resolve)
+
+    # stdlib robotparser rules differ across Python versions; the cassette
+    # was recorded where every page was allowed, so pin that decision here.
+    async def _allow_all(self: Any, url: str) -> bool:
+        return True
+
+    monkeypatch.setattr(ScraperClient, "_robots_allowed", _allow_all)
     graph = build_graph(
         settings,
         llm=OpenAIStructuredLLM(settings),

@@ -11,13 +11,18 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      # actions/checkout@v7.0.1
+      # actions/checkout@v7.0.1 — full history: gitleaks scans PR commits
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
 
       # astral-sh/setup-uv@v9.0.0
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
@@ -54,7 +59,6 @@ jobs:
         env:
           OPENAI_API_KEY: ""
           SEARCH_API_KEY: ""
-          LANGCHAIN_API_KEY: ""
           JWT_SECRET_KEY: ""
 
       - name: Coverage artifact
@@ -85,6 +89,7 @@ jobs:
       - name: gitleaks
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
 
   postgres-contract:
@@ -167,6 +172,9 @@ jobs:
     steps:
       # actions/checkout@v7.0.1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      # astral-sh/setup-uv@v9.0.0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
 
       - name: Generate SBOM (CycloneDX, from the locked manifest)
         run: |

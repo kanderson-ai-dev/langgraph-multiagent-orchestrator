@@ -18,6 +18,7 @@ helpers are safe for the temp/in-memory databases tests use.
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 import time
 from collections.abc import AsyncIterator
@@ -49,12 +50,15 @@ def _ensure_parent(path: str) -> None:
     """
     if path == ":memory:" or path.startswith("file:"):
         return
+    parent = Path(path).parent
     try:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise OSError(
             f"cannot create parent directory for SQLite database {path!r}: {exc}"
         ) from exc
+    if not os.access(parent, os.W_OK | os.X_OK):
+        raise OSError(f"parent directory for SQLite database {path!r} is not writable")
 
 
 async def _apply_pragmas(db: Any) -> None:
