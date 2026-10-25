@@ -347,7 +347,7 @@ soupsieve==2.10
     # via beautifulsoup4
 sqlite-vec==0.1.9
     # via langgraph-checkpoint-sqlite
-starlette==1.7.0
+starlette==1.9.0
     # via
     #   fastapi
     #   prometheus-fastapi-instrumentator
