@@ -7,7 +7,13 @@ from pydantic import BaseModel
 
 from app.graph.nodes.researcher import ResearcherWorker, ResearchPlan
 from app.graph.nodes.reviewer import ReviewerWorker, ReviewOutput, verify_citations
-from app.graph.nodes.writer import DraftCitation, DraftOutput, WriterWorker
+from app.graph.nodes.writer import (
+    DraftCitation,
+    DraftOutput,
+    DraftOutputPassages,
+    PassageCitation,
+    WriterWorker,
+)
 from app.graph.state import Brief, Citation, EvidenceItem, ReportDraft, ReviewVerdict
 from app.services.llm_client import StubLLM
 from app.services.scraper_client import ScrapedPage
@@ -172,3 +178,64 @@ def test_verify_citations_helper() -> None:
     kept, dropped, _h, _u = verify_citations(draft, _evidence())
     assert len(kept) == 1
     assert dropped == 1
+
+
+async def test_writer_extractive_mode_resolves_passage_ids(
+    brief: Brief, prompts: Any
+) -> None:
+    """Extractive mode: writer emits passage ids, code resolves verbatim text."""
+    stub = StubLLM()
+    stub.register(
+        "DraftOutputPassages",
+        lambda s, c: DraftOutputPassages(
+            title="RAG Adoption",
+            markdown="# RAG Adoption",
+            citations=[
+                PassageCitation(claim="grounded", passage_id="S0-P0"),
+                PassageCitation(claim="bogus", passage_id="S9-P9"),
+            ],
+        ),
+    )
+    w = WriterWorker(llm=stub, prompts=prompts, citation_mode="extractive")
+    state = {"brief": brief, "evidence": _evidence()}
+    out = await w.run(state)
+    draft: ReportDraft = out["drafts"][0]
+    assert len(draft.citations) == 2
+    good, bad = draft.citations
+    assert good.quote  # resolved verbatim text
+    assert good.quote in _evidence()[0].text
+    assert good.source_url == _evidence()[0].url
+    assert bad.source_url == "passage:S9-P9" and bad.quote == ""
+
+
+async def test_writer_revision_prompt_shows_previous_draft(
+    brief: Brief, prompts: Any
+) -> None:
+    """F6: round 2 receives the v1 markdown, not a blank page."""
+    captured: dict[str, str] = {}
+
+    class _Spy(StubLLM):
+        async def structured(self, schema, *, system, user, context=None):  # type: ignore[no-untyped-def]
+            captured["user"] = user
+            return await super().structured(
+                schema, system=system, user=user, context=context
+            )
+
+    stub = _Spy()
+    stub.register(
+        "DraftOutput",
+        lambda s, c: DraftOutput(title="T2", markdown="# new", citations=[]),
+    )
+    w = WriterWorker(llm=stub, prompts=prompts)
+    prev = ReportDraft(version=1, title="T", markdown="# THE OLD DRAFT XYZ", citations=[])
+    verdict = ReviewVerdict(
+        draft_version=1, verdict="revise", score=3.0,
+        feedback=["fix citations"], unsupported_citations=1,
+    )
+    await w.run({
+        "brief": brief, "evidence": _evidence(),
+        "drafts": [prev], "latest_verdict": verdict, "debate_round": 1,
+    })
+    assert "THE OLD DRAFT XYZ" in captured["user"]
+    assert "MINIMAL" in captured["user"]
+    assert "fix citations" in captured["user"]

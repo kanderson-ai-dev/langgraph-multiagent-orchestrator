@@ -106,7 +106,10 @@ def build_all_workers(
             max_queries=settings.max_sub_questions,
             scrape_top_k=settings.research_scrape_top_k,
         ),
-        WriterWorker(overrides.get("writer", llm), prompts),
+        WriterWorker(
+            overrides.get("writer", llm), prompts,
+            citation_mode=settings.citation_mode,
+        ),
         ReviewerWorker(
             overrides.get("reviewer", llm), prompts,
             citation_shortcircuit=settings.reviewer_citation_shortcircuit,
