@@ -15,6 +15,15 @@ _HTML_TYPES = {"text/html", "application/xhtml+xml", ""}
 _PDF_TYPES = {"application/pdf"}
 _WS_RE = re.compile(r"[ \t]+")
 
+# Chrome that is never the article: structural tags plus class/id patterns
+# typical of cookie bars, menus, promos and sidebar rails.
+_BOILER_TAGS = ("nav", "header", "footer", "aside", "form", "iframe")
+_BOILER_RE = re.compile(
+    r"cookie|consent|banner|menu|sidebar|nav-|navbar|footer|header|"
+    r"promo|advert|subscribe|newsletter|modal|popup|breadcrumb|social|share",
+    re.IGNORECASE,
+)
+
 
 class ParsedDocument(BaseModel):
     url: str
@@ -29,11 +38,21 @@ def _clean(text: str) -> str:
 
 
 def parse_html(body: bytes, url: str) -> ParsedDocument:
+    """Main-content extraction: chrome/boilerplate removed, ``<article>`` or
+    ``<main>`` preferred when it actually holds the text (fallback: the
+    boilerplate-stripped body)."""
     soup = BeautifulSoup(body, "lxml")
     for tag in soup(["script", "style", "noscript", "template", "svg"]):
         tag.decompose()
+    for tag in soup(_BOILER_TAGS):
+        tag.decompose()
+    for attr in ("class", "id", "role"):
+        for el in soup.find_all(attrs={attr: _BOILER_RE}):
+            el.decompose()
     title = soup.title.get_text(strip=True) if soup.title else ""
-    text = _clean(soup.get_text("\n"))
+    main = soup.find("article") or soup.find("main")
+    root = main if main and len(main.get_text(strip=True)) >= 200 else soup
+    text = _clean(root.get_text("\n"))
     return ParsedDocument(url=url, title=title, text=text, kind="html")
 
 
