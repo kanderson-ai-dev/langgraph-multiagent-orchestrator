@@ -15,6 +15,7 @@ Anything else is unsupported: dropped from the report and counted.
 
 import re
 import string
+import unicodedata
 from difflib import SequenceMatcher
 
 _PUNCT_TABLE = str.maketrans("", "", string.punctuation)
@@ -49,9 +50,68 @@ _CURRENCY_SYMBOLS = frozenset("$€£¥₹")
 
 _CAP_RE = re.compile(r"[A-Z][\w.-]*")
 
+# Quote-side only: Markdown decoration is the writer's syntax, not source
+# text — strip it before any comparison.
+_MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+
+# An ellipsis the writer placed to span a gap: "…" (any run) or "...".
+_ELLIPSIS_RE = re.compile(r"…+|(?:\.\s*){2,}")
+
+
+def _strip_markdown(quote: str) -> str:
+    return _MD_LINK_RE.sub(r"\1", quote).replace("`", "")
+
 
 def _normalize(text: str) -> str:
-    return _WS_RE.sub(" ", text.lower().translate(_PUNCT_TABLE)).strip()
+    """Case-fold + punctuation/whitespace-insensitive normal form.
+
+    ``NFKC`` folds curly quotes to ASCII, full-width forms to ASCII,
+    ellipses to ``...`` and no-break spaces to plain spaces; a Unicode
+    punctuation-category sweep then removes what NFKC leaves (em/en
+    dashes, guillemets) the same way ``_PUNCT_TABLE`` removes ASCII
+    punctuation, and format characters (soft hyphens, zero-width spaces)
+    are dropped entirely. Applied identically to quote and source, so a
+    scraped page's typography can no longer fail a genuinely verbatim
+    quote.
+    """
+    folded = unicodedata.normalize("NFKC", text)
+    stripped = folded.translate(_PUNCT_TABLE)
+    cleaned = "".join(
+        "" if unicodedata.category(ch) == "Cf"
+        else " " if unicodedata.category(ch).startswith("P")
+        else ch
+        for ch in stripped
+    )
+    return _WS_RE.sub(" ", cleaned.lower()).strip()
+
+
+def _spans_supported(quote: str, source_text: str) -> bool | None:
+    """Ellipsis rule — ``None`` when the quote carries no ellipsis.
+
+    A quote like ``"growth of 40 % … across all pilot sites"`` marks a
+    span across source text. Every segment must normalize to ≥ 4 words
+    (shorter fragments are unverifiable) and appear **in order** in the
+    normalized source — an exact, case/punctuation-insensitive substring,
+    so digits, entities and negations inside each segment still have to
+    match literally.
+    """
+    if not _ELLIPSIS_RE.search(quote):
+        return None
+    segments = [
+        _normalize(_strip_markdown(p)) for p in _ELLIPSIS_RE.split(quote)
+    ]
+    ns = _normalize(source_text)
+    pos = 0
+    for seg in segments:
+        if not seg:
+            continue
+        if len(seg.split()) < 4:
+            return False
+        found = ns.find(seg, pos)
+        if found < 0:
+            return False
+        pos = found + len(seg)
+    return True
 
 
 def _best_window(
@@ -111,6 +171,12 @@ def citation_supported(quote: str, source_text: str, *, threshold: float = 0.85)
         return False
     if quote in source_text:  # 1. verbatim
         return True
+    quote = _strip_markdown(quote)
+    if quote in source_text:
+        return True
+    spans = _spans_supported(quote, source_text)
+    if spans is not None:
+        return spans
     nq, ns = _normalize(quote), _normalize(source_text)
     if not nq or not ns:
         return False
@@ -137,3 +203,46 @@ def citation_supported(quote: str, source_text: str, *, threshold: float = 0.85)
 def support_rate(supported: int, total: int) -> float:
     """Citation support rate; an empty draft has nothing verified."""
     return supported / total if total else 0.0
+
+
+def explain_quote(
+    quote: str, source_text: str, *, threshold: float = 0.85
+) -> dict[str, object]:
+    """Instrumented ``citation_supported`` — same checks, plus *why*.
+
+    Returns ``{"supported": bool, "stage": <first failing stage>,
+    "best_ratio": float}`` where stage is one of ``verbatim``,
+    ``punctuation``, ``fuzzy`` (ratio below threshold), ``critical``,
+    ``entities``, ``currency`` or ``ok``. Used by the live-gate diagnosis
+    tool to turn a bare dropped-count into a failure taxonomy.
+    """
+    fail = {"supported": False, "best_ratio": 0.0}
+    if not quote or not source_text:
+        return {**fail, "stage": "empty"}
+    if quote in source_text:
+        return {"supported": True, "stage": "ok", "best_ratio": 1.0}
+    quote = _strip_markdown(quote)
+    if quote in source_text:
+        return {"supported": True, "stage": "ok", "best_ratio": 1.0}
+    spans = _spans_supported(quote, source_text)
+    if spans is not None:
+        return {
+            "supported": spans,
+            "stage": "ok" if spans else "spans",
+            "best_ratio": 1.0 if spans else 0.0,
+        }
+    nq, ns = _normalize(quote), _normalize(source_text)
+    if not nq or not ns:
+        return {**fail, "stage": "empty"}
+    if nq in ns:
+        return {"supported": True, "stage": "ok", "best_ratio": 1.0}
+    ratio, window = _best_window(nq.split(), ns.split())
+    if ratio < threshold:
+        return {**fail, "stage": "fuzzy", "best_ratio": ratio}
+    if _critical(nq.split()) != _critical(window):
+        return {**fail, "stage": "critical", "best_ratio": ratio}
+    if not _entities(quote).issubset(set(window)):
+        return {**fail, "stage": "entities", "best_ratio": ratio}
+    if (set(quote) & _CURRENCY_SYMBOLS) - (set(source_text) & _CURRENCY_SYMBOLS):
+        return {**fail, "stage": "currency", "best_ratio": ratio}
+    return {"supported": True, "stage": "ok", "best_ratio": ratio}

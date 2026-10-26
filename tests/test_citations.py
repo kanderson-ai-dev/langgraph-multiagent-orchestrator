@@ -157,3 +157,86 @@ def test_number_outside_best_window_still_checks() -> None:
         "that revenue grew 12% in 2023 across all regions."
     )
     assert not citation_supported("revenue grew 21% in 2023", src)
+
+
+def test_curly_quotes_and_typographic_apostrophe() -> None:
+    source = "The bank’s deployment cut resolution time by 40 % across pilots."
+    quote = "the bank's deployment cut resolution time by 40 % across pilots"
+    assert citation_supported(quote, source)
+
+
+def test_em_dash_and_nbsp_and_ellipsis() -> None:
+    source = (
+        "Revenue grew 12\u00a0% year-over-year — driven by edge "
+        "deployments\u2026 with more to come."
+    )
+    quote = "revenue grew 12 % year-over-year driven by edge deployments"
+    assert citation_supported(quote, source)
+
+
+def test_unicode_punctuation_does_not_save_a_wrong_number() -> None:
+    source = "Costs fell 12 % — the report says."
+    assert not citation_supported("costs fell 21 %", source)
+
+
+def test_fullwidth_forms_fold() -> None:
+    source = "Ｒｅｌｅａｓｅ ｖ２ launched in June."
+    assert citation_supported("release v2 launched in june", source)
+
+
+def test_ellipsis_span_accepted_when_in_order() -> None:
+    source = (
+        "Adoption doubled in 2024 as tooling matured. Several unrelated "
+        "sentences sit between the two halves of this evidence. Procurement "
+        "teams report audit preparation time fell by 30 %."
+    )
+    quote = "adoption doubled in 2024 as tooling matured … audit preparation time fell by 30 %"
+    assert citation_supported(quote, source)
+
+
+def test_ellipsis_out_of_order_rejected() -> None:
+    source = "Alpha first claim here. Much later: second claim there."
+    assert not citation_supported(
+        quote="second claim there … alpha first claim here", source_text=source
+    )
+
+
+def test_ellipsis_short_segment_rejected() -> None:
+    source = "Costs fell sharply. Later: adoption rose quickly across the board."
+    assert not citation_supported("costs fell … rose quickly across the board", source)
+
+
+def test_distant_sentences_without_ellipsis_rejected() -> None:
+    source = (
+        "Adoption doubled in 2024 as tooling matured and buyers returned. "
+        "Fifty unrelated words now separate the halves of this evidence so "
+        "no window can contain both claims at once, on purpose, really. "
+        "Procurement teams report audit preparation time fell by 30 %."
+    )
+    quote = (
+        "adoption doubled in 2024 as tooling matured and buyers returned "
+        "audit preparation time fell by 30 %"
+    )
+    assert not citation_supported(quote, source)
+
+
+def test_markdown_link_and_emphasis_stripped() -> None:
+    source = "The platform reports 99.95 % uptime across regions."
+    assert citation_supported("[the platform reports](https://x) **99.95 % uptime**", source)
+
+
+def test_mutated_digit_breaks_accepted_quote_seeded() -> None:
+    """Property: mutating any digit of an accepted quote makes it rejected."""
+    import random
+
+    source = "Revenue grew 12 % in 2024 and churn fell to 3 %."
+    quote = "revenue grew 12 % in 2024 and churn fell to 3 %"
+    assert citation_supported(quote, source)
+    rng = random.Random(20261026)
+    positions = [i for i, ch in enumerate(quote) if ch.isdigit()]
+    for pos in positions:
+        mutated = list(quote)
+        mutated[pos] = rng.choice("0123456789")
+        if mutated[pos] == quote[pos]:
+            mutated[pos] = str((int(quote[pos]) + 1) % 10)
+        assert not citation_supported("".join(mutated), source), pos
