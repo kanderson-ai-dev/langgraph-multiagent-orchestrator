@@ -28,7 +28,12 @@ from app.core.thresholds import EDD_THRESHOLDS  # noqa: F401  (re-export)
 from app.graph.graph import build_graph, initial_state
 from app.graph.nodes.researcher import ResearchPlan
 from app.graph.nodes.reviewer import ReviewOutput, Rubric
-from app.graph.nodes.writer import DraftCitation, DraftOutput
+from app.graph.nodes.writer import (
+    DraftCitation,
+    DraftOutput,
+    DraftOutputPassages,
+    PassageCitation,
+)
 from app.graph.state import Brief, OrchestrationState
 from app.services.llm_client import StubLLM, build_judge_llm
 from app.services.prompt_registry import PromptRegistry
@@ -169,6 +174,22 @@ def build_eval_stub() -> StubLLM:
         ),
     )
     stub.register(
+        "DraftOutputPassages",
+        lambda s, c: DraftOutputPassages(
+            title="Evaluation Report",
+            markdown=(
+                "## Summary\nEnterprises adopting retrieval augmented "
+                "generation report measurable grounding improvements."
+            ),
+            citations=[
+                PassageCitation(
+                    claim="Grounding improves with retrieval",
+                    passage_id="S0-P0",
+                )
+            ],
+        ),
+    )
+    stub.register(
         "ReviewOutput",
         lambda s, c: ReviewOutput(
             verdict="approve",
@@ -246,6 +267,7 @@ async def run_eval_case(
     judge_llm: Any = None,
     search: Any = None,
     scraper: Any = None,
+    llm_overrides: dict[str, Any] | None = None,
     auto_review: bool = False,
 ) -> tuple[dict[str, Any], OrchestrationState]:
     """Run one dataset case through the real graph.
@@ -304,6 +326,7 @@ async def run_eval_case(
                             scraper=scraper or FixtureScraper(),  # type: ignore[arg-type]
                             prompts=registry,
                             checkpointer=checkpointer,
+                            llm_overrides=llm_overrides,
                         )
                         out, hitl_resumes = await _invoke_resolving_hitl(
                             graph, state, callbacks, job_id
@@ -315,6 +338,7 @@ async def run_eval_case(
                         search=search or FixtureSearch(),
                         scraper=scraper or FixtureScraper(),  # type: ignore[arg-type]
                         prompts=registry,
+                        llm_overrides=llm_overrides,
                     )
                     out = cast(
                         OrchestrationState,
