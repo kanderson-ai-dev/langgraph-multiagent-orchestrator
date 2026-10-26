@@ -60,12 +60,21 @@ def _langfuse_client() -> Any | None:
 
 
 def _inputs(case: EvalCase) -> dict[str, Any]:
+    """Every field that affects the run must reach the dataset item.
+
+    An earlier version dropped ``report_type``/``language``/``tenant_context``,
+    so tenant-context injection cases ran live as harmless briefs and the
+    blocked gate was never exercised (measured 0.818 vs required 1.0).
+    """
     return {
         "case_id": case.case_id,
         "topic": case.topic,
         "audience": case.audience,
         "tone": case.tone,
         "requirements": case.requirements,
+        "report_type": case.report_type,
+        "language": case.language,
+        "tenant_context": case.tenant_context,
     }
 
 
@@ -84,12 +93,14 @@ def _ensure_dataset(client: Any) -> Any:
             ),
         )
     known = {
-        (item.metadata or {}).get("case_id")
+        (item.metadata or {}).get("case_id"): getattr(item, "input", None)
         for item in getattr(dataset, "items", [])
         if getattr(item, "metadata", None)
     }
     for case in DATASET:
-        if case.case_id in known:
+        # Upsert on the stable item id: a case whose stored input differs
+        # (schema grew, fields were dropped) is rewritten, not skipped.
+        if known.get(case.case_id) == _inputs(case):
             continue
         client.create_dataset_item(
             dataset_name=DATASET_NAME,
