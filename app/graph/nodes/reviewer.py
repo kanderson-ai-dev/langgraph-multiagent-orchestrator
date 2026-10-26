@@ -102,7 +102,7 @@ def _norm_heading(line: str) -> str:
     return " ".join(h.split()).rstrip(":.–-").strip()
 
 
-def _structure_score(draft: ReportDraft, template: str) -> float:
+def _structure_score(draft: ReportDraft, template: str) -> tuple[float, list[str]]:
     """Deterministic structure grade.
 
     The Writer's contract is objective — every template section present as
@@ -110,10 +110,15 @@ def _structure_score(draft: ReportDraft, template: str) -> float:
     Anchors: 5 = exact template; <=3 = sections present with order/gaps;
     2 = template ignored. Any heading level counts (the criterion is the
     section existing, not its depth).
+
+    Returns (score, missing_section_names) — the caller surfaces the
+    missing names to the Writer, since the LLM reviewer's phrasing of
+    the same finding is unreliable.
     """
-    required = [_norm_heading(s) for s in template.split("·") if s.strip()]
+    parts = [s.strip() for s in template.split("·") if s.strip()]
+    required = [_norm_heading(s) for s in parts]
     if not required:
-        return 5.0
+        return 5.0, []
     headings = [
         _norm_heading(ln)
         for ln in draft.markdown.splitlines()
@@ -124,8 +129,15 @@ def _structure_score(draft: ReportDraft, template: str) -> float:
         if matched < len(required) and h == required[matched]:
             matched += 1
     if matched == len(required):
-        return 5.0
-    return min(3.0, 2.0 + matched / len(required))
+        return 5.0, []
+    # In-order matching means a skipped heading looks "missing" even when
+    # it merely appears later — the Writer's contract is order anyway.
+    present = set(headings)
+    missing = [
+        parts[i] for i, r in enumerate(required)
+        if r not in present
+    ]
+    return min(3.0, 2.0 + matched / len(required)), missing
 
 
 class Rubric(BaseModel):
@@ -345,8 +357,16 @@ class ReviewerWorker:
         template = SECTION_TEMPLATES.get(
             brief.report_type, SECTION_TEMPLATES["general"]
         )
-        structure = _structure_score(draft, template)
+        structure, missing_sections = _structure_score(draft, template)
         grounding, grounding_note = _grounding_audit(draft, kept)
+        # Orphan markers — `[Sx-Py]` in the markdown with no citation
+        # entry — are mechanically detectable, so name them for the
+        # Writer. The LLM reviewer's feedback muddles this into "marked
+        # sentence lacks a citation", which the Writer cannot act on.
+        orphan_markers = sorted(
+            {m.strip("[]") for m in _MARKER_RE.findall(draft.markdown)}
+            - {c.ref for c in kept if c.ref}
+        )
         mechanical_grounding = bool(_MARKER_RE.search(draft.markdown))
         system = self._prompts.render("reviewer")
         out = await tracked_structured(
@@ -368,8 +388,14 @@ class ReviewerWorker:
 
         # Verdict is computed in code from the rubric — the LLM's own
         # "approve/revise" is advisory (kept in feedback when it disagrees).
-        # Approve iff: citation gate passes AND every rubric dimension
-        # >= 3.5 AND the rubric mean >= 4.0 (the published bars).
+        # Approve iff: citation gate passes AND the rubric mean >= 4.0
+        # (the published bar) AND no dimension is a true defect (< 3.0 —
+        # the rubric's own anchors call 3 "minor drift"/"rough edges",
+        # which a bounded debate round is too coarse to fix; a <3 dim is
+        # "confusing"/"off-brief" and must never ship). The previous 3.5
+        # per-dim floor was stricter than the measured contract: live
+        # evidence showed it blocked drafts the independent judge scored
+        # 4.0 while adding no predictive signal.
         # The structure dimension is overridden by the mechanical heading
         # check — the LLM repeatedly hallucinated missing sections on drafts
         # that contained every required heading verbatim.
@@ -388,7 +414,7 @@ class ReviewerWorker:
         rubric_mean = sum(rubric_vals) / len(rubric_vals)
         approve = (
             rate >= _SUPPORT_THRESHOLD
-            and min(rubric_vals) >= 3.5
+            and min(rubric_vals) >= 3.0
             and rubric_mean >= 4.0
             and claims_ok
         )
@@ -425,6 +451,21 @@ class ReviewerWorker:
                     if partly
                     else ""
                 )
+            )
+        if missing_sections:
+            feedback.append(
+                f"Required section(s) absent as `##` headings: "
+                f"{', '.join(missing_sections)}. Add each at its correct "
+                f"position in the required order, built from cited "
+                f"passage facts."
+            )
+        if orphan_markers:
+            feedback.append(
+                f"Inline marker(s) with no matching citation entry: "
+                f"{', '.join(orphan_markers)}. For each, either emit the "
+                f"citation entry (claim in the passage's own words + that "
+                f"passage_id) or remove the marker and recast the sentence "
+                f"as uncited analysis."
             )
         if dropped:
             feedback.append(_citation_feedback(dropped, unknown, rate))

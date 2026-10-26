@@ -38,7 +38,10 @@ class Settings(BaseSettings):
 
     # LLM
     openai_api_key: SecretStr | None = None
-    chat_model_name: str = "gpt-4o-mini"
+    # Measured on the live gate (Phase 6.5 model matrix): gpt-4.1-mini
+    # clears every threshold with roughly double the judge-score margin
+    # of gpt-4o-mini at ~1.4x cost — still ~4x under the $0.08/job cap.
+    chat_model_name: str = "gpt-4.1-mini"
     # Writer citation contract: free_quote = the model types the quote;
     # extractive = it cites a passage id and code resolves verbatim text.
     citation_mode: str = "free_quote"  # "free_quote" | "extractive"

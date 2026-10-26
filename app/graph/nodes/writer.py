@@ -257,11 +257,49 @@ class WriterWorker:
                     Citation(claim=c.claim, quote=c.quote, source_url=c.source_url)
                 )
                 continue
-            pid = getattr(c, "passage_id", "")
+            # The model sometimes emits the bracketed marker form
+            # ("[S9-P9]") — the schema's pattern is re.search-based so it
+            # validates. Normalize to the bare id so resolve() and marker
+            # rewriting see the same string.
+            raw_pid = getattr(c, "passage_id", "")
+            m = re.search(r"S\d+-P\d+", raw_pid)
+            pid = m.group(0) if m else raw_pid
             p = index.resolve(pid)
+            best = max(
+                index.by_id.values(),
+                key=lambda q: _claim_coverage(c.claim, q.text),
+                default=None,
+            )
+            best_cov = _claim_coverage(c.claim, best.text) if best else 0.0
+            remaps = (
+                # The emitted id never existed — but another passage may
+                # state the claim (the model mistyped an index). Remap to a
+                # clear match.
+                (p is None and best_cov >= _CLAIM_COVERAGE_MIN)
+                # Right claim, wrong passage: the model attached a
+                # topically related id rather than the one stating the
+                # fact. Re-point at the clearly better passage — the quote
+                # stays verbatim evidence text. If nothing clearly states
+                # the claim, it stays as cited and the claim adjudicator
+                # decides.
+                or (
+                    p is not None
+                    and best is not None
+                    and best.pid != pid
+                    and best_cov >= _CLAIM_COVERAGE_MIN
+                    and best_cov - _claim_coverage(c.claim, p.text) >= 0.2
+                )
+            )
+            if remaps and best is not None:
+                logger.info(
+                    "citation_remapped",
+                    old=pid, new=best.pid, claim=c.claim[:120],
+                )
+                remapped.append((pid, best.pid))
+                p = best
             if p is None:
-                # Unknown id → counted as an unknown-URL citation by the
-                # verifier, exactly like a hallucinated source.
+                # No passage states the claim — keep it visible as an
+                # unknown-URL citation, exactly like a hallucinated source.
                 citations.append(
                     Citation(
                         claim=c.claim, quote="",
@@ -270,27 +308,6 @@ class WriterWorker:
                 )
                 dead_markers.append(pid)
                 continue
-            cov = _claim_coverage(c.claim, p.text)
-            best = max(
-                index.by_id.values(), key=lambda q: _claim_coverage(c.claim, q.text)
-            )
-            best_cov = _claim_coverage(c.claim, best.text)
-            if (
-                best.pid != pid
-                and best_cov >= _CLAIM_COVERAGE_MIN
-                and best_cov - cov >= 0.2
-            ):
-                # Right claim, wrong passage: the model attached a topically
-                # related id rather than the one stating the fact. Re-point
-                # at the clearly better passage — the quote stays verbatim
-                # evidence text. If nothing clearly states the claim, it
-                # stays as cited and the claim adjudicator decides.
-                logger.info(
-                    "citation_remapped",
-                    old=pid, new=best.pid, claim=c.claim[:120],
-                )
-                remapped.append((pid, best.pid))
-                p = best
             citations.append(
                 Citation(claim=c.claim, quote=p.text, source_url=p.url, ref=p.pid)
             )

@@ -353,7 +353,7 @@ def test_structure_score_full_template() -> None:
 
     draft = ReportDraft(version=1, title="t", markdown=ALL_SECTIONS_MARKDOWN)
     for tpl in SECTION_TEMPLATES.values():
-        assert _structure_score(draft, tpl) == 5.0
+        assert _structure_score(draft, tpl) == (5.0, [])
 
 
 def test_structure_score_missing_section() -> None:
@@ -362,8 +362,9 @@ def test_structure_score_missing_section() -> None:
 
     md = "## Executive Summary\nx.\n## Findings\ny.\n## Sources\nz."
     draft = ReportDraft(version=1, title="t", markdown=md)
-    score = _structure_score(draft, SECTION_TEMPLATES["general"])
+    score, missing = _structure_score(draft, SECTION_TEMPLATES["general"])
     assert score <= 3.0
+    assert missing  # names the absent required headings
 
 
 def test_grounding_audit_all_markers_resolve() -> None:
