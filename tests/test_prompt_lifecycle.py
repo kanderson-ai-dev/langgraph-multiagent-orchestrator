@@ -322,8 +322,10 @@ def test_promote_blocked_by_real_pipeline_regression(
     metrics = detail["metrics"]
     assert metrics["promoted_metrics"]["rubric_score_avg"] == pytest.approx(4.5)
     assert metrics["candidate_metrics"]["rubric_score_avg"] == pytest.approx(3.0)
-    # Safety metrics are unaffected — the regression is real and localized.
-    assert metrics["candidate_metrics"]["debate_convergence_rate"] == 1.0
+    # Under the rubric-derived verdict, a 3.0-scoring reviewer cannot
+    # approve — convergence legitimately drops. That IS the regression the
+    # promotion gate must see (advisory "approve" no longer masks it).
+    assert metrics["candidate_metrics"]["debate_convergence_rate"] == 0.0
 
 
 # ─── rollback & audit chain ──────────────────────────────────────────────────

@@ -220,12 +220,31 @@ class ReviewerWorker:
             },
         )
 
-        verdict_str: Verdict = "approve" if out.verdict == "approve" else "revise"
-        feedback = list(out.feedback)
+        # Verdict is computed in code from the rubric — the LLM's own
+        # "approve/revise" is advisory (kept in feedback when it disagrees).
+        # Approve iff: citation gate passes AND every rubric dimension
+        # >= 3.5 AND the rubric mean >= 4.0 (the published bars).
+        rubric_vals = [
+            out.rubric.structure, out.rubric.clarity,
+            out.rubric.grounding, out.rubric.tone,
+        ]
+        rubric_mean = sum(rubric_vals) / len(rubric_vals)
+        approve = (
+            rate >= _SUPPORT_THRESHOLD
+            and min(rubric_vals) >= 3.5
+            and rubric_mean >= 4.0
+        )
+        verdict_str: Verdict = "approve" if approve else "revise"
+        if (out.verdict == "approve") != approve:
+            feedback = [
+                f"(advisory) model verdict was {out.verdict!r}; "
+                f"rule-derived verdict is {verdict_str}"
+            ]
+        else:
+            feedback = []
+        feedback += list(out.feedback)
         if dropped:
             feedback.append(_citation_feedback(dropped, unknown, rate))
-            if rate < _SUPPORT_THRESHOLD:
-                verdict_str = "revise"  # measured quality gate, not vibes
 
         verdict = ReviewVerdict(
             draft_version=draft.version,

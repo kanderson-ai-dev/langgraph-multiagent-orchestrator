@@ -108,11 +108,14 @@ def _stub(verdicts: list[str]) -> StubLLM:
     def _review(schema: Any, ctx: Any) -> ReviewOutput:
         v = seq[min(calls["n"], len(seq) - 1)]
         calls["n"] += 1
+        # The reviewer verdict is derived from rubric scores in code now —
+        # a scripted "revise" therefore needs a sub-threshold rubric.
+        score = 4.2 if v == "approve" else 3.0
         return ReviewOutput(
             verdict=v,
-            score=4.2,
-            rubric={"structure": 4.2, "clarity": 4.2,
-                    "grounding": 4.2, "tone": 4.2},
+            score=score,
+            rubric={"structure": score, "clarity": score,
+                    "grounding": score, "tone": score},
             feedback=["revise once"] if v == "revise" else [],
         )
 

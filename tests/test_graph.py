@@ -61,13 +61,15 @@ def _stub_llm(*, verdict: str = "approve") -> StubLLM:
             ],
         ),
     )
+    score = 4.2 if verdict == "approve" else 3.0
     stub.register(
         "ReviewOutput",
         lambda s, c: ReviewOutput(
             verdict=verdict,
-            score=4.2,
+            score=score,
             rubric={
-                "structure": 4.2, "clarity": 4.2, "grounding": 4.2, "tone": 4.2
+                "structure": score, "clarity": score,
+                "grounding": score, "tone": score,
             },
             feedback=[],
         ),

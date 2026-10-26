@@ -136,7 +136,8 @@ def _revising_stub(score: float) -> StubLLM:
 
 
 async def test_early_exit_high_score_skips_extra_round() -> None:
-    """revise@4.9 with clean citations → FINISH, not another writer round."""
+    """High rubric + clean citations → approve in one round, whatever the
+    advisory verdict says (verdict is rubric-derived now)."""
     settings = _settings(review_early_exit_score=4.5, max_debate_rounds=3)
     graph = build_graph(
         settings, llm=_revising_stub(4.9),
@@ -152,7 +153,7 @@ async def test_early_exit_high_score_skips_extra_round() -> None:
         config={"configurable": {"thread_id": "ee"}},
     )
     assert out["status"] == "done"
-    assert any("Early exit" in m.content for m in out["transcript"])
+    assert out["latest_verdict"].verdict == "approve"
     # Only one debate round was needed.
     assert out["debate_round"] == 1
 
@@ -160,7 +161,7 @@ async def test_early_exit_high_score_skips_extra_round() -> None:
 async def test_no_early_exit_below_threshold() -> None:
     settings = _settings(review_early_exit_score=4.5, max_debate_rounds=1)
     graph = build_graph(
-        settings, llm=_revising_stub(4.0),
+        settings, llm=_revising_stub(3.0),
         search=_FakeSearch(), scraper=_FakeScraper(),  # type: ignore[arg-type]
         checkpointer=MemorySaver(),
     )
