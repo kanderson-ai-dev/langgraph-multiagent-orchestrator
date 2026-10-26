@@ -16,7 +16,7 @@ content** gathered by the Researcher agent.
 | Credential leakage | Logs, errors, config | `SecretStr` config, `structlog` field redaction, generic 401s, no secrets in query strings |
 | Auth bypass | Job/report endpoints | JWT when `JWT_SECRET_KEY` is set; all routes scoped by `workspace_id` (multi-tenant isolation) |
 | Rate abuse | `/auth/login`, job submission | Sliding-window `RateLimiter` protocol — in-memory default, Redis backend for multi-replica (`app/core/rate_limit.py`) |
-| Dependency / supply chain | CI | `pip-audit`, `gitleaks`, CycloneDX SBOM + validation, CodeQL, Dependabot, SHA-pinned GitHub Actions |
+| Dependency / supply chain | CI | `pip-audit`, `gitleaks`, CycloneDX SBOM + validation, CodeQL, SHA-pinned GitHub Actions |
 | Prompt tampering | Prompt Registry templates | Lifecycle mutations are **admin-only** (RBAC) and every mutation appends to a hash-chained audit log — tampering is detectable (`PromptStore.audit_log`) |
 | Promotion abuse | Registry `promote`/`rollback` | Metric-gated promotion (`run_ab_eval` + `PROMPT_PROMOTION_EPSILON`); admin overrides require an explicit `reason` that lands in the audit chain |
 | Malicious candidates | `POST /prompts/{name}/candidates` | Candidate registration is admin-gated; a candidate is never promoted without measured eval results — supply ends in an auditable `draft`, never silently live |

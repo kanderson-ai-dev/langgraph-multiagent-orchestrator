@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
-# Base image pinned by digest (python:3.13-slim) — Dependabot's docker
-# ecosystem bumps the pin on upstream rebuilds.
+# Base image pinned by digest (python:3.13-slim) — re-resolve the
+# digest by hand when the base image is refreshed.
 ARG PY_SLIM=python:3.13-slim@sha256:cf50a4f6ac4f026458b08d5222023d700ac806410dff5e9ca8728fa44f2b850f
 
 # ── builder: resolve locked runtime deps, nothing ships from here ─────────────

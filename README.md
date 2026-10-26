@@ -279,7 +279,7 @@ Read this honestly: the offline stub *models* the classic single-shot failure
 verification and the input guardrail are *for* — the baseline ships an
 unverifiable quote and happily answers the injection brief. The baseline is
 also genuinely cheaper and faster, and rubric parity under the stub proves
-nothing about real-model quality — that comparison is a live-eval question
+nothing about real-model quality — that comparison is a live-evaluation question
 the credential-gated workflow answers. What the pipeline buys is
 verification, safety, and bounded self-correction — at ~2× the stub-token
 cost and 3× the calls of a single prompt.
@@ -477,7 +477,7 @@ middleware, robots.txt-compliant scraper with delays and size caps,
 `workspace_id` isolation on every route (cross-tenant probes → `404`),
 admin-only prompt lifecycle with an audit-chained trail, and secret hygiene
 enforced by `SecretStr`, redacted logs, `.gitignore`/`.dockerignore`
-coverage, `gitleaks` + `pip-audit` + SBOM/CodeQL/Dependabot in CI. Full
+coverage, `gitleaks` + `pip-audit` + SBOM/CodeQL in CI. Full
 mapping: [`SECURITY.md`](SECURITY.md).
 
 ---
@@ -502,7 +502,7 @@ docker compose up --build   # PORT=8001 docker compose up --build to remap
 ```
 
 The image is non-root (uid 10001), health-checked, digest-pinned
-(`python:3.13-slim@sha256:…`, bumped by Dependabot's docker ecosystem),
+(`python:3.13-slim@sha256:…`, re-resolved by hand when the base image is refreshed),
 and persists jobs + checkpoints to a named volume; `.env` is read at
 runtime — no secrets are baked in. Runtime stage carries no pip,
 setuptools or `__pycache__` (530 MB; compose adds `read_only`,
@@ -576,7 +576,7 @@ docs/                  # adr/, eval/, observability/ (Grafana), ui-qa/,
 scripts/               # record_demo.py (GIF), capture_screenshots.py,
                        # export_feedback.py
 .github/workflows/     # ci.yml (py3.11/3.12 matrix + docker smoke + SBOM),
-                       # codeql.yml, live-eval.yml, dependabot.yml
+                       # codeql.yml
 ```
 
 ## 🧪 Verification
@@ -595,8 +595,9 @@ CI (`.github/workflows/ci.yml`, Python **3.11 + 3.12** matrix): `uv sync
 --frozen` → ruff → mypy strict → pytest+coverage → EDD gate → Playwright
 browser E2E → pip-audit → gitleaks → Docker build + `/api/v1/health`
 container smoke → CycloneDX SBOM generation + validation. All actions are
-SHA-pinned; CodeQL runs weekly, Dependabot opens grouped updates, and the
-credential-gated `live-eval.yml` publishes scorecards/trends as artifacts.
+SHA-pinned; CodeQL runs weekly, and dependency refreshes are done by hand
+(`pip-audit --strict` fails CI on any known vulnerability). Live evaluations
+run locally, never in CI.
 Versioned QA checklists live in `docs/ui-qa/` + `docs/functional-qa/`.
 
 ## 🛠️ Stack
