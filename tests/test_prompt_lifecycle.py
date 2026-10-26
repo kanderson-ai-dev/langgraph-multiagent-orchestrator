@@ -111,16 +111,15 @@ def test_list_prompts(client: TestClient) -> None:
     assert r.status_code == 200
     body = r.json()
     assert "writer" in body and "supervisor" in body
-    writer_v1 = body["writer"][0]
-    assert writer_v1["version"] == 1
-    assert writer_v1["status"] == "promoted"
-    assert writer_v1["sha256"]
+    writer_promoted = next(pv for pv in body["writer"] if pv["status"] == "promoted")
+    assert writer_promoted["version"] == 21
+    assert writer_promoted["sha256"]
 
 
 def test_list_versions(client: TestClient) -> None:
     r = client.get("/api/v1/prompts/writer")
     assert r.status_code == 200
-    assert [v["version"] for v in r.json()] == [1]
+    assert [v["version"] for v in r.json()] == list(range(1, 22))
 
 
 def test_unknown_prompt_404(client: TestClient) -> None:
@@ -139,15 +138,15 @@ def test_unknown_prompt_404(client: TestClient) -> None:
 
 def test_create_candidate_and_diff(client: TestClient) -> None:
     v = _create_candidate(client)
-    assert v == 2
+    assert v == 22
     r = client.get("/api/v1/prompts/writer")
-    assert [pv["version"] for pv in r.json()] == [1, 2]
-    assert r.json()[1]["status"] == "candidate"
+    assert [pv["version"] for pv in r.json()] == list(range(1, 23))
+    assert r.json()[21]["status"] == "candidate"
 
-    r = client.get("/api/v1/prompts/writer/diff?from=1&to=2")
+    r = client.get(f"/api/v1/prompts/writer/diff?from=21&to={v}")
     assert r.status_code == 200
     diff = r.json()["diff"]
-    assert "--- writer v1" in diff and "+++ writer v2" in diff
+    assert "--- writer v21" in diff and f"+++ writer v{v}" in diff
     assert "+You are the Writer v2" in diff
 
 
@@ -181,7 +180,7 @@ def test_ab_test_runs_real_eval(client: TestClient) -> None:
     r = client.post("/api/v1/prompts/writer/ab-test", json={"version": v})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["promoted_version"] == 1
+    assert body["promoted_version"] == 21
     assert body["candidate_version"] == v
     # Stub pipeline: identical prompts → identical (clean) metrics, zero deltas.
     assert body["promoted_metrics"]["citation_support_rate"] == 1.0
@@ -213,7 +212,11 @@ def test_promote_clean_candidate(client: TestClient) -> None:
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "promoted"
     versions = {pv["version"]: pv["status"] for pv in client.get("/api/v1/prompts/writer").json()}
-    assert versions == {1: "retired", 2: "promoted"}
+    expected = {i: "candidate" for i in range(1, 21)}
+    expected[1] = "retired"
+    expected[21] = "retired"
+    expected[v] = "promoted"
+    assert versions == expected
 
 
 def test_promote_blocked_on_regression(client: TestClient) -> None:
@@ -227,7 +230,11 @@ def test_promote_blocked_on_regression(client: TestClient) -> None:
     assert any("debate_convergence_rate" in f for f in detail["failures"])
     # Blocked promotion must not change lifecycle state.
     versions = {pv["version"]: pv["status"] for pv in client.get("/api/v1/prompts/writer").json()}
-    assert versions == {1: "promoted", 2: "candidate"}
+    expected = {i: "candidate" for i in range(1, 21)}
+    expected[1] = "retired"
+    expected[21] = "promoted"
+    expected[v] = "candidate"
+    assert versions == expected
 
 
 def test_promote_override_with_reason(client: TestClient) -> None:
@@ -262,7 +269,7 @@ def test_promote_override_requires_reason(client: TestClient) -> None:
 
 
 def test_promote_already_promoted(client: TestClient) -> None:
-    r = client.post("/api/v1/prompts/writer/promote", json={"version": 1})
+    r = client.post("/api/v1/prompts/writer/promote", json={"version": 21})
     assert r.status_code == 409
 
 
@@ -286,7 +293,7 @@ def test_promote_blocked_by_real_pipeline_regression(
                 3.0
                 if context
                 and context.get("prompt_name") == "reviewer"
-                and context.get("prompt_version") != 1
+                and context.get("prompt_version") != 4
                 else 4.5
             )
             return ReviewOutput(
@@ -343,11 +350,15 @@ def test_rollback_restores_previous(client: TestClient) -> None:
 
     r = client.post(
         "/api/v1/prompts/writer/rollback",
-        json={"to_version": 1, "reason": "candidate underperforms in prod"},
+        json={"to_version": 21, "reason": "candidate underperforms in prod"},
     )
     assert r.status_code == 200, r.text
     versions = {pv["version"]: pv["status"] for pv in client.get("/api/v1/prompts/writer").json()}
-    assert versions == {1: "promoted", 2: "rolled_back"}
+    expected = {i: "candidate" for i in range(1, 21)}
+    expected[1] = "retired"
+    expected[21] = "promoted"
+    expected[v] = "rolled_back"
+    assert versions == expected
 
     audit = client.get("/api/v1/prompts/audit").json()
     assert audit["valid"] is True
@@ -366,7 +377,7 @@ def test_rollback_requires_reason(client: TestClient) -> None:
 def test_rollback_same_version_conflict(client: TestClient) -> None:
     r = client.post(
         "/api/v1/prompts/writer/rollback",
-        json={"to_version": 1, "reason": "already promoted"},
+        json={"to_version": 21, "reason": "already promoted"},
     )
     assert r.status_code == 409
 

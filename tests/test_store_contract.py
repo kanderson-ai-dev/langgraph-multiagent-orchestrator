@@ -453,13 +453,13 @@ def test_prompt_registry_on_store_backend(prompt_store: Any, ws: Any) -> None:
     )
 
     reg = PromptRegistry.load(store=prompt_store)
-    assert reg.get("writer").version == 1
+    assert reg.get("writer").version == 21
     cand = reg.create_candidate("writer", "pg body\n", "on store")
     assert cand.status == PromptStatus.CANDIDATE
-    reg.promote("writer", 2, actor="t")
-    assert reg.get("writer").version == 2
-    reg.rollback("writer", 1, actor="t", reason="x")
-    assert reg.get("writer").version == 1
+    reg.promote("writer", cand.version, actor="t")
+    assert reg.get("writer").version == cand.version
+    reg.rollback("writer", 21, actor="t", reason="x")
+    assert reg.get("writer").version == 21
     valid, _root, entries = reg.verify_audit_chain()
     assert valid and len(entries) >= 3
     # A/B run record, scoped.

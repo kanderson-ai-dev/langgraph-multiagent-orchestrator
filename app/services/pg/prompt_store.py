@@ -64,12 +64,21 @@ class PgPromptStore:
         status_overridden: int,
         preserve_overridden_status: bool,
     ) -> None:
-        status_clause = (
-            "   status=CASE WHEN prompt_versions.status_overridden=1"
-            "     THEN prompt_versions.status ELSE excluded.status END,"
-            if preserve_overridden_status
-            else "   status=excluded.status,"
-        )
+        if preserve_overridden_status:
+            # A runtime status override (promote/retire/rollback) must
+            # survive every later seed re-sync — preserving the status but
+            # clearing the flag made the override last exactly one sync.
+            status_fragment = (
+                "   status=CASE WHEN prompt_versions.status_overridden=1"
+                "     THEN prompt_versions.status ELSE excluded.status END,"
+                "   status_overridden=CASE WHEN prompt_versions.status_overridden=1"
+                "     THEN 1 ELSE excluded.status_overridden END"
+            )
+        else:
+            status_fragment = (
+                "   status=excluded.status,"
+                "   status_overridden=excluded.status_overridden"
+            )
         with self._lock:
             conn = self._db()
             conn.execute(
@@ -80,8 +89,7 @@ class PgPromptStore:
                 "   target_model=excluded.target_model,"
                 "   variables=excluded.variables, changelog=excluded.changelog,"
                 "   template=excluded.template, sha256=excluded.sha256,"
-                f"   source=excluded.source, {status_clause}"
-                "   status_overridden=excluded.status_overridden",
+                f"   source=excluded.source, {status_fragment}",
                 (
                     pv.name, pv.version, pv.status.value, pv.author,
                     pv.created_at.isoformat(), pv.target_model,

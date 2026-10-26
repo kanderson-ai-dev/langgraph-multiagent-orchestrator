@@ -1,6 +1,6 @@
 name: reviewer
 version: 1
-status: promoted
+status: retired
 author: kaarsten
 created_at: 2026-10-13T00:00:00Z
 target_model: gpt-4o-mini

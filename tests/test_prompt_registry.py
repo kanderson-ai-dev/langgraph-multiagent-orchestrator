@@ -246,25 +246,25 @@ def test_candidate_create_and_promote_persists(tmp_path: Path) -> None:
     cand = reg.create_candidate(
         "writer", "Improved writer prompt.\n", "tighter quotes", author="tester"
     )
-    assert cand.version == 2 and cand.status == PromptStatus.CANDIDATE
+    assert cand.status == PromptStatus.CANDIDATE
 
-    reg.promote("writer", 2, actor="tester", reason="better")
-    assert reg.get("writer").version == 2
-    assert reg.get("writer", 1).status == PromptStatus.RETIRED
+    reg.promote("writer", cand.version, actor="tester", reason="better")
+    assert reg.get("writer").version == cand.version
+    assert reg.get("writer", 21).status == PromptStatus.RETIRED
 
     # Reload from the same DB: runtime state survives the restart.
     reg2 = _db_registry(tmp_path)
-    assert reg2.get("writer").version == 2
-    assert reg2.get("writer", 1).status == PromptStatus.RETIRED
+    assert reg2.get("writer").version == cand.version
+    assert reg2.get("writer", 21).status == PromptStatus.RETIRED
 
 
 def test_rollback_marks_rolled_back(tmp_path: Path) -> None:
     reg = _db_registry(tmp_path)
-    reg.create_candidate("writer", "v2 body\n", "c2")
-    reg.promote("writer", 2, actor="t")
-    reg.rollback("writer", 1, actor="t", reason="v2 regressed")
-    assert reg.get("writer").version == 1
-    assert reg.get("writer", 2).status == PromptStatus.ROLLED_BACK
+    cand = reg.create_candidate("writer", "v2 body\n", "c2")
+    reg.promote("writer", cand.version, actor="t")
+    reg.rollback("writer", 21, actor="t", reason="v2 regressed")
+    assert reg.get("writer").version == 21
+    assert reg.get("writer", cand.version).status == PromptStatus.ROLLED_BACK
 
 
 def test_candidate_variable_mismatch_rejected(tmp_path: Path) -> None:
@@ -282,8 +282,8 @@ def test_readonly_registry_rejects_mutations() -> None:
 def test_audit_chain_detects_tampering(tmp_path: Path) -> None:
     db = str(tmp_path / "reg.sqlite")
     reg = PromptRegistry.load(db_path=db)
-    reg.create_candidate("writer", "body\n", "c")
-    reg.promote("writer", 2, actor="t")
+    cand = reg.create_candidate("writer", "body\n", "c")
+    reg.promote("writer", cand.version, actor="t")
     valid, root, entries = reg.verify_audit_chain()
     assert valid and len(entries) == 2 and root == entries[-1]["hash"]
 
@@ -304,7 +304,7 @@ def test_overrides_view_pins_versions(tmp_path: Path) -> None:
     assert view.render("writer").text == "candidate text\n"
     assert view.get("writer").version == cand.version
     # Base registry unaffected.
-    assert reg.get("writer").version == 1
+    assert reg.get("writer").version == 21
     # Override view is read-only.
     with pytest.raises(PromptRegistryError, match="read-only"):
         view.create_candidate("writer", "x\n", "c")
@@ -324,19 +324,18 @@ def test_two_instances_share_one_overlay(tmp_path: Path) -> None:
 
     # A creates a candidate; B sees it on its next read (revision bump).
     cand = reg_a.create_candidate("writer", "two-proc body\n", "host A")
-    assert cand.version == 2
-    assert reg_b.get("writer", 2).template == "two-proc body\n"
-    assert reg_b.get("writer", 2).status == PromptStatus.CANDIDATE
+    assert reg_b.get("writer", cand.version).template == "two-proc body\n"
+    assert reg_b.get("writer", cand.version).status == PromptStatus.CANDIDATE
 
     # A promotes it; B's promoted pointer follows.
-    reg_a.promote("writer", 2, actor="a", reason="shipped")
-    assert reg_b.get("writer").version == 2
-    assert reg_b.get("writer", 1).status == PromptStatus.RETIRED
+    reg_a.promote("writer", cand.version, actor="a", reason="shipped")
+    assert reg_b.get("writer").version == cand.version
+    assert reg_b.get("writer", 21).status == PromptStatus.RETIRED
 
     # A rolls back; B sees the restoration too.
-    reg_a.rollback("writer", 1, actor="a", reason="regression")
-    assert reg_b.get("writer").version == 1
-    assert reg_b.get("writer", 2).status == PromptStatus.ROLLED_BACK
+    reg_a.rollback("writer", 21, actor="a", reason="regression")
+    assert reg_b.get("writer").version == 21
+    assert reg_b.get("writer", cand.version).status == PromptStatus.ROLLED_BACK
 
     # The lifecycle chain is shared and still verifies on both sides.
     valid_a, root_a, _ = reg_a.verify_audit_chain()
@@ -351,12 +350,38 @@ def test_prompt_store_protocol_any_backend(tmp_path: Path) -> None:
 
     store = SqlitePromptStore(str(tmp_path / "reg.sqlite"))
     reg = PromptRegistry.load(store=store)
-    assert reg.get("writer").version == 1
+    assert reg.get("writer").version == 21
     cand = reg.create_candidate("writer", "store body\n", "via store")
     assert cand.status == PromptStatus.CANDIDATE
-    reg.promote("writer", 2, actor="t")
-    assert reg.get("writer").version == 2
+    reg.promote("writer", cand.version, actor="t")
+    assert reg.get("writer").version == cand.version
     reg.__exit__()
     # Second registry on a fresh store over the same DB sees it.
     reg2 = PromptRegistry.load(store=SqlitePromptStore(str(tmp_path / "reg.sqlite")))
-    assert reg2.get("writer").version == 2
+    assert reg2.get("writer").version == cand.version
+
+
+def test_status_override_survives_repeated_seed_resyncs(tmp_path) -> None:
+    """promote() marks v1 retired via a DB status override; every later
+    ``load()`` re-syncs the YAML seeds. A bug let the re-sync consult the
+    override flag and clear it in the same upsert, so the retirement lasted
+    exactly one sync — the second reverted v1 to 'promoted' and ``load()``
+    then failed validation with two promoted versions."""
+    from app.services.prompt_store import SqlitePromptStore
+
+    db = str(tmp_path / "reg.sqlite")
+    reg = PromptRegistry.load(db_path=db)
+    cand = reg.create_candidate("writer", "candidate body\n", "resync test")
+    reg.promote("writer", cand.version, actor="t", reason="wins")
+
+    # Two independent loads over the same DB file — each runs _sync_yaml.
+    for _ in range(2):
+        reloaded = PromptRegistry.load(db_path=db)
+        promoted = [
+            pv.version
+            for pv in reloaded.list_versions("writer")
+            if pv.status == PromptStatus.PROMOTED
+        ]
+        assert promoted == [cand.version]
+        assert reloaded.get("writer", 1).status == PromptStatus.RETIRED
+    assert PromptRegistry.load(store=SqlitePromptStore(db)).get("writer").version == cand.version
