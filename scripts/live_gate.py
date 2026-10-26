@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.core.config import Settings  # noqa: E402
 from app.core.thresholds import EDD_THRESHOLDS  # noqa: E402
 from app.graph.citations import explain_quote  # noqa: E402
+from app.graph.claim_support import judge_claim_support  # noqa: E402
 from app.graph.nodes.reviewer import verify_citations  # noqa: E402
 from app.services.llm_client import (  # noqa: E402
     OpenAIStructuredLLM,
@@ -56,15 +57,15 @@ from app.services.prompt_eval import (  # noqa: E402
 from app.services.prompt_registry import PromptRegistry  # noqa: E402
 from app.services.scraper_client import ScrapedPage, ScrapeError  # noqa: E402
 from app.services.search_client import SearchResult, build_search_client  # noqa: E402
-from evaluation.claim_support import judge_claim_support  # noqa: E402
 from evaluation.dataset import DATASET, EvalCase  # noqa: E402
 
 RESULTS_DIR = Path("evaluation/results/live")
 SNAPSHOT_DIR = Path("evaluation/evidence_snapshots")
 
-# Conservative per-case projection for the cap check: pipeline ≈ $0.08
-# budget + judge. Aborting early keeps a mid-run surprise from breaching.
-_PROJECTED_PER_CASE_USD = 0.20
+# Per-case projection for the cap check — ~4x the observed ~$0.012 average
+# (gpt-4o-mini pipeline + gpt-4o judge). Deliberately tight: a fat
+# projection would refuse small probe caps, a thin one risks overshoot.
+_PROJECTED_PER_CASE_USD = 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -141,9 +142,11 @@ class _SnapshotSearch:
         if not self._pool:
             self.misses.append(f"search:{query}")
             return []
-        return [
-            SearchResult.model_validate(r) for r in self._pool[:max_results]
-        ]
+        # All recorded results, not pool[:max_results] — the record run saw
+        # a different top-N per query; returning only the head would starve
+        # the scrape stage to the same two URLs (and if those were recorded
+        # failures, the case gets zero evidence and fails).
+        return [SearchResult.model_validate(r) for r in self._pool]
 
 
 class _SnapshotScraper:
@@ -242,6 +245,7 @@ def _diagnose_case(state: Any) -> list[dict[str, Any]]:
         out.append(
             {
                 "claim": c.claim[:200],
+                "ref": c.ref or None,
                 "quote": c.quote[:400],
                 "source_url": c.source_url,
                 "kept": id(c) in kept_ids,
@@ -317,19 +321,57 @@ async def _run_once(
                 use_scraper = _SnapshotScraper(snap)
                 snap_clients = [use_search, use_scraper]
 
-        metrics, state = await run_eval_case(
-            case_id=case.case_id,
-            brief=brief_for_case(case),
-            expect_blocked=case.expect_blocked,
-            settings=settings,
-            registry=registry,
-            llm=llm,
-            judge_llm=judge_llm,
-            search=use_search,
-            scraper=use_scraper,
-            llm_overrides=overrides,
-            auto_review=True,
-        )
+        try:
+            metrics, state = await run_eval_case(
+                case_id=case.case_id,
+                brief=brief_for_case(case),
+                expect_blocked=case.expect_blocked,
+                settings=settings,
+                registry=registry,
+                llm=llm,
+                judge_llm=judge_llm,
+                search=use_search,
+                scraper=use_scraper,
+                llm_overrides=overrides,
+                auto_review=True,
+            )
+        except Exception as exc:  # one bad case must not kill the run
+            print(
+                f"  {case.case_id}: CASE ERROR {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            metrics = {
+                "case_id": case.case_id,
+                "status": "error",
+                "citation_support": 0.0,
+                "rubric_score": 0.0,
+                "judge_score": 0.0,
+                "converged": False,
+                "blocked": False,
+                "expected_blocked": case.expect_blocked,
+                "hitl_resumes": 0,
+                "debate_rounds": 0,
+                "duration_seconds": 0.0,
+                "cost_usd": 0.0,
+                "judge_cost_usd": 0.0,
+                "llm_calls": 0,
+                "claim_support_rate": 0.0,
+                "claim_verdicts": [],
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            results.append(metrics)
+            case_records.append(
+                {
+                    **metrics,
+                    "verdict": None,
+                    "sub_questions": [],
+                    "headings": [],
+                    "final_markdown": "",
+                    "citations": [],
+                    "evidence": [],
+                }
+            )
+            continue
         # Integrity metric (D3): does each surviving quote actually back
         # its claim? One batched judge call per case — eval-time only.
         citations_final = (
@@ -352,9 +394,36 @@ async def _run_once(
             _save_snapshot(case.case_id, store)
         for c in snap_clients:
             snapshot_misses.extend(getattr(c, "misses", []))
+        latest = state.get("latest_verdict") if isinstance(state, dict) else None
+        final_draft = (
+            state.get("drafts", [])[-1]
+            if isinstance(state, dict) and state.get("drafts")
+            else None
+        )
+        headings = (
+            [ln.strip() for ln in final_draft.markdown.splitlines() if ln.startswith("#")]
+            if final_draft is not None
+            else []
+        )
         case_records.append(
             {
                 **metrics,
+                "verdict": (
+                    {
+                        "verdict": latest.verdict,
+                        "score": latest.score,
+                        "rubric": latest.rubric,
+                        "feedback": latest.feedback,
+                        "unsupported": latest.unsupported_citations,
+                    }
+                    if latest is not None
+                    else None
+                ),
+                "sub_questions": list(state.get("sub_questions", []))
+                if isinstance(state, dict)
+                else [],
+                "headings": headings,
+                "final_markdown": final_draft.markdown if final_draft else "",
                 "citations": per_cit,
                 "evidence": [
                     {
@@ -504,6 +573,8 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--limit", type=int, default=0,
                         help="first N cases only (smoke)")
+    parser.add_argument("--only", default="",
+                        help="comma-separated case_ids — targeted probes")
     parser.add_argument("--pin", action="append", default=[],
                         metavar="NAME=VERSION", dest="pins")
     parser.add_argument("--snapshot", choices=["none", "record", "replay"],
@@ -527,6 +598,12 @@ def main() -> int:
         cases: list[EvalCase] = list(HELDOUT)
     else:
         cases = list(DATASET)
+    if args.only:
+        wanted = set(args.only.split(","))
+        cases = [c for c in cases if c.case_id in wanted]
+        if not cases:
+            print(f"--only matched nothing in {wanted}", file=sys.stderr)
+            return 1
     if args.limit:
         cases = cases[: args.limit]
 

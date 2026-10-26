@@ -16,6 +16,7 @@ from app.graph.state import Brief
 from app.services.llm_client import StubLLM
 from app.services.scraper_client import ScrapedPage
 from app.services.search_client import SearchResult
+from tests.conftest import ALL_SECTIONS_MARKDOWN
 
 
 class _FakeSearch:
@@ -47,7 +48,7 @@ def _llm() -> StubLLM:
     stub.register(
         "DraftOutput",
         lambda s, c: DraftOutput(
-            title="t", markdown="m",
+            title="t", markdown=ALL_SECTIONS_MARKDOWN,
             citations=[DraftCitation(
                 claim="c", quote="fan out evidence",
                 source_url="https://src.test/a",

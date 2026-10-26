@@ -35,7 +35,7 @@ from app.framework import (
 from app.graph.deciders import make_llm_decider, rule_based_decider
 from app.graph.nodes.researcher import ResearchPlan
 from app.graph.nodes.reviewer import ReviewOutput, Rubric
-from app.graph.nodes.specialist import SpecialistAnalysis
+from app.graph.nodes.specialist import Finding, SpecialistAnalysis
 from app.graph.nodes.writer import DraftOutput
 from app.graph.report_assembler import assemble_report
 from app.graph.state import AgentMessage, OrchestrationState
@@ -138,7 +138,7 @@ def _register_stub_builders(llm: StubLLM) -> None:
     llm.register_default(
         "SpecialistAnalysis",
         lambda s, c: SpecialistAnalysis(
-            findings=["offline stub finding"],
+            findings=[Finding(text="offline stub finding")],
             flags=[],
             recommendation="offline stub recommendation",
         ),

@@ -72,15 +72,28 @@ def _replay_settings() -> Settings:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "VCR cassettes were recorded against the pre-upgrade prompt shapes "
-        "(first-1500-chars evidence, no previous-draft block). They are "
-        "re-recorded against the final stack in the upgrade plan's Phase 8."
-    ),
+@pytest.mark.parametrize(
+    "case_id",
+    [
+        pytest.param(
+            c,
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason=(
+                    "VCR cassettes were recorded against the pre-upgrade "
+                    "prompt shapes (first-1500-chars evidence, no "
+                    "previous-draft block). They are re-recorded against "
+                    "the final stack in the upgrade plan's Phase 8."
+                ),
+            ),
+        )
+        if c != "blocked-injection"
+        # Guardrail-blocked before any LLM call — its cassette is prompt-
+        # shape independent, so it still replays green today.
+        else c
+        for c in CASES_TO_RECORD
+    ],
 )
-@pytest.mark.parametrize("case_id", CASES_TO_RECORD)
 async def test_recorded_case_replays_offline(
     case_id: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

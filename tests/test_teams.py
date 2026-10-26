@@ -11,13 +11,14 @@ from app.graph.deciders import rule_based_decider
 from app.graph.graph import build_graph, initial_state
 from app.graph.nodes.researcher import ResearchPlan
 from app.graph.nodes.reviewer import ReviewOutput
-from app.graph.nodes.specialist import SpecialistAnalysis
+from app.graph.nodes.specialist import Finding, SpecialistAnalysis
 from app.graph.nodes.writer import DraftCitation, DraftOutput
 from app.graph.state import Brief
 from app.graph.teams import SECTION_TEMPLATES, TEAMS, team_for
 from app.services.llm_client import StubLLM
 from app.services.scraper_client import ScrapedPage
 from app.services.search_client import SearchResult
+from tests.conftest import ALL_SECTIONS_MARKDOWN
 
 _HTML = (
     b"<html><title>Src</title><body>Vendor revenue grew 40% YoY and SOC2 "
@@ -54,7 +55,7 @@ def _stub_llm() -> StubLLM:
         "DraftOutput",
         lambda s, c: DraftOutput(
             title="Vendor Report",
-            markdown="# Report\nVendor revenue grew 40% YoY.",
+            markdown=ALL_SECTIONS_MARKDOWN + "\nVendor revenue grew 40% YoY.",
             citations=[
                 DraftCitation(
                     claim="Revenue growth",
@@ -78,7 +79,7 @@ def _stub_llm() -> StubLLM:
     stub.register(
         "SpecialistAnalysis",
         lambda s, c: SpecialistAnalysis(
-            findings=["revenue +40% YoY"],
+            findings=[Finding(text="revenue +40% YoY")],
             flags=["none material"],
             recommendation="vendor is financially healthy",
         ),

@@ -34,8 +34,11 @@ class PassageCitation(BaseModel):
     """Extractive citation: point at a passage id, never retype a quote."""
 
     claim: str
+    # Pattern constraint lands in the JSON schema — structured output
+    # cannot emit "financial_analyst" instead of a real passage id.
     passage_id: str = Field(
-        description="Passage id from the evidence block, e.g. S0-P2"
+        pattern=r"S\d+-P\d+",
+        description="Passage id from the evidence block, e.g. S0-P2",
     )
 
 
@@ -87,8 +90,15 @@ class WriterWorker:
         template = SECTION_TEMPLATES.get(
             brief.report_type, SECTION_TEMPLATES["general"]
         )
+        # Numbered heading list, not the "·"-joined string — an inline list
+        # let the model merge or drop sections (observed live: missing
+        # "Analysis" cost structure=3 and the round).
+        section_list = "\n".join(
+            f"{i}. {s}" for i, s in enumerate(template.split(" · "), 1)
+        )
         tenant = (
-            f"\nClient context (orient the report to them): {brief.tenant_context}"
+            f"Client context (orient the report to them): "
+            f"{brief.tenant_context}\n"
             if brief.tenant_context
             else ""
         )
@@ -101,7 +111,12 @@ class WriterWorker:
                 f"flags: {'; '.join(n.flags)}; recommendation: {n.recommendation}"
                 for n in notes
             )
-            notes_block = f"\n\nSpecialist analyst notes:\n{rendered}"
+            notes_block = (
+                "\n\nSpecialist analyst notes (internal context — use for "
+                "orientation, but NEVER cite an analyst name as a source; "
+                "cite the evidence passage that states the fact):\n"
+                f"{rendered}"
+            )
 
         feedback = ""
         if verdict is not None and (verdict.feedback or state.get("drafts")):
@@ -118,8 +133,16 @@ class WriterWorker:
             )
         cite_rule = (
             "\n\nCitations: for every factual claim, cite the passage id "
-            "(e.g. S0-P2) shown in brackets before the passage — do NOT "
-            "retype quotes; the system attaches the exact text."
+            "(e.g. S0-P2) shown in brackets before the passage — the passage "
+            "text must directly state that claim, and the claim text you "
+            "record must restate only what that passage states (no numbers, "
+            "names or scope beyond it). Put the SAME marker inline in the "
+            "markdown right after the sentence it backs: `... 69% of firms "
+            "report X [S0-P2].` Do NOT retype quotes; the system attaches "
+            "the exact text. Never cite a passage that only mentions the "
+            "topic; prefer passages containing the concrete fact. Specialist "
+            "analyst notes are context, not evidence — the only valid "
+            "citation targets are `[Sx-Py]` passage ids."
             if self._citation_mode == "extractive"
             else ""
         )
@@ -127,7 +150,11 @@ class WriterWorker:
             f"Topic: {brief.topic}\nAudience: {brief.audience}\n"
             f"Tone: {brief.tone}\nLanguage: {brief.language}\n"
             f"Report type: {brief.report_type}\n"
-            f"Required section structure: {template}{tenant}\n"
+            f"Required sections — every one MUST appear as a `##` heading, "
+            f"spelled exactly as listed, in this order:\n{section_list}\n"
+            f"(If a `Sources` section is listed, emit the heading with an "
+            f"empty body — the source list is generated automatically.)\n"
+            f"{tenant}\n"
             f"Requirements:\n{reqs}\n\n"
             f"Evidence (cite only from these sources):\n{ev_block}"
             f"{notes_block}"
@@ -163,7 +190,10 @@ class WriterWorker:
                 p = index.resolve(getattr(c, "passage_id", ""))
                 if p is not None:
                     citations.append(
-                        Citation(claim=c.claim, quote=p.text, source_url=p.url)
+                        Citation(
+                            claim=c.claim, quote=p.text,
+                            source_url=p.url, ref=p.pid,
+                        )
                     )
                 else:
                     # Unknown id → counted as an unknown-URL citation by the

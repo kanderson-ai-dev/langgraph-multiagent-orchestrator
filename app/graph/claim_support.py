@@ -2,14 +2,17 @@
 
 ``citation_support`` proves the *quote exists* in the cited source. It does
 not prove the quote actually supports the *claim* — extractive citations
-make existence trivially true, so an independent check is what keeps the
-metric honest (this is the upgrade plan's integrity guard, D3).
+make existence trivially true, so semantic adjudication is what keeps the
+metric honest (the upgrade plan's integrity guard, D3).
 
-Eval-time only, never in the request path. One batched call per case: the
-judge model (a different model than the Writer) labels every citation
-``yes`` / ``partly`` / ``no``; ``claim_support_rate`` is the share of
-``yes``. Verdicts are stored per-citation in the live run file so they can
-be hand-checked for calibration.
+Two call sites share this module: the Reviewer runs it inside the debate
+loop on the *quote-verified* citations so weak claims can be revised or
+dropped before approval, and the live gate re-runs it post-hoc with an
+independent judge model (a different model than the Writer). Each call
+labels every citation ``yes`` / ``partly`` / ``no``;
+``claim_support_rate`` is the share of ``yes``. Verdicts are stored
+per-citation in the live run file so they can be hand-checked for
+calibration.
 """
 
 from typing import Any, Literal
@@ -28,11 +31,18 @@ class ClaimVerdicts(BaseModel):
 _SYSTEM = (
     "You are a fact-checking judge. For each numbered item you are given a "
     "claim from a report and the exact quote that was cited to support it. "
-    "Decide whether the quote genuinely supports the claim: 'yes' = the "
-    "quote directly states or clearly implies the claim; 'partly' = it "
-    "supports only part of it or requires heavy interpretation; 'no' = "
-    "unrelated or contradicting. Answer with one verdict per item, in "
-    "order, nothing else."
+    "First classify the claim: FACTUAL claims assert something a source "
+    "could literally state (names, numbers, events, capabilities); "
+    "ANALYTIC claims are the report author's own synthesis — "
+    "recommendations, judgments, outlook, implications. Then decide "
+    "whether the quote genuinely supports the claim: for FACTUAL claims, "
+    "'yes' = the quote directly states or clearly implies the claim; for "
+    "ANALYTIC claims, 'yes' = the quote provides the factual basis for "
+    "that judgment (a cost recommendation citing cost evidence counts; a "
+    "recommendation citing merely topical text does not). In both cases "
+    "'partly' = thin, partial, or heavily-interpreted support and "
+    "'no' = unrelated or contradicting. Answer with one verdict per item, "
+    "in order, nothing else."
 )
 
 

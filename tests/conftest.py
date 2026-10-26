@@ -44,6 +44,15 @@ def prompts() -> PromptRegistry:
     return PromptRegistry.load()
 
 
+# Stub-draft markdown containing every section of every SECTION_TEMPLATES
+# entry as `##` headings — the mechanical structure check in the Reviewer
+# matches required headings as an ordered subsequence, so this draft shape
+# satisfies every report_type at once.
+from app.services.prompt_eval import _template_cover_markdown
+
+ALL_SECTIONS_MARKDOWN = _template_cover_markdown()
+
+
 @pytest.fixture()
 def brief_kwargs() -> dict[str, object]:
     """Minimal valid report-brief fields shared across tests."""

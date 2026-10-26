@@ -35,6 +35,7 @@ from app.graph.nodes.writer import (
     PassageCitation,
 )
 from app.graph.state import Brief, OrchestrationState
+from app.graph.teams import SECTION_TEMPLATES
 from app.services.llm_client import StubLLM, build_judge_llm
 from app.services.prompt_registry import PromptRegistry
 from app.services.scraper_client import ScrapedPage
@@ -146,6 +147,25 @@ async def judge_report(
     return float(out.score)
 
 
+def _template_cover_markdown() -> str:
+    """Markdown containing every SECTION_TEMPLATES heading so the mechanical
+    structure check passes for ANY report_type: the check matches required
+    headings as an ordered subsequence, so emitting each template's unique
+    middle sections in order (with Recommendation/Sources last, where every
+    template puts them) covers them all."""
+    body: list[str] = []
+    tail: list[str] = []
+    for tpl in SECTION_TEMPLATES.values():
+        for s in tpl.split(" · "):
+            s = s.strip()
+            if s in ("Recommendation", "Sources"):
+                if s not in tail:
+                    tail.append(s)
+            elif s not in body:
+                body.append(s)
+    return "\n".join(f"## {s}\nStub paragraph." for s in (*body, *tail))
+
+
 def build_eval_stub() -> StubLLM:
     """Deterministic outputs: grounded draft citing fixture text, approve."""
     stub = StubLLM()
@@ -158,7 +178,8 @@ def build_eval_stub() -> StubLLM:
         lambda s, c: DraftOutput(
             title="Evaluation Report",
             markdown=(
-                "## Summary\nEnterprises adopting retrieval augmented "
+                _template_cover_markdown()
+                + "\nEnterprises adopting retrieval augmented "
                 "generation report measurable grounding improvements."
             ),
             citations=[
@@ -178,7 +199,8 @@ def build_eval_stub() -> StubLLM:
         lambda s, c: DraftOutputPassages(
             title="Evaluation Report",
             markdown=(
-                "## Summary\nEnterprises adopting retrieval augmented "
+                _template_cover_markdown()
+                + "\nEnterprises adopting retrieval augmented "
                 "generation report measurable grounding improvements."
             ),
             citations=[

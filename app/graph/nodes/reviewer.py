@@ -10,6 +10,7 @@ A support rate below threshold forces ``revise`` — quality is measured,
 never assumed.
 """
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -20,6 +21,7 @@ from app.core.metrics import DEBATE_ROUNDS_TOTAL
 from app.core.thresholds import EDD_THRESHOLDS
 from app.framework.worker import StateUpdate
 from app.graph.citations import citation_supported, support_rate
+from app.graph.claim_support import judge_claim_support
 from app.graph.state import (
     AgentMessage,
     Brief,
@@ -48,6 +50,77 @@ def _citation_feedback(dropped: int, unknown: int, rate: float) -> str:
             "the source URL to one that was actually fetched."
         )
     return base
+
+
+_MARKER_RE = re.compile(r"\[S\d+-P\d+\]")
+
+
+def _grounding_audit(
+    draft: ReportDraft, kept: list[Citation]
+) -> tuple[float, str]:
+    """Deterministic grounding check for extractive (marker) drafts.
+
+    Grounding = "every factual claim traceable to a supported citation".
+    With inline `[Sx-Py]` markers that is mechanically decidable: a marker
+    either resolves to a verified citation or it does not. The *semantic*
+    half — does the cited claim actually cover the sentence — is measured
+    by the independent claim-support judge, not guessed here.
+
+    Returns (score, audit_note). Score anchors: 5 = every marker resolves;
+    <=3 = citations exist but text is untraceable / markers unresolved;
+    2 = no citations at all.
+    """
+    markers = {m.strip("[]") for m in _MARKER_RE.findall(draft.markdown)}
+    if not draft.citations and not markers:
+        return 2.0, "no citations and no inline markers"
+    if not markers:
+        return 3.0, (
+            f"{len(draft.citations)} citation(s) but no inline markers — "
+            "claims are not traceable to the text"
+        )
+    kept_refs = {c.ref for c in kept if c.ref}
+    unresolved = sorted(markers - kept_refs)
+    if unresolved:
+        return (
+            max(2.0, 5.0 - 1.5 * len(unresolved)),
+            f"{len(markers)} inline marker(s), unresolved: "
+            f"{', '.join(unresolved)}",
+        )
+    return (
+        5.0,
+        f"all {len(markers)} inline marker(s) resolve to supported citations",
+    )
+
+
+def _norm_heading(line: str) -> str:
+    h = line.lstrip("#").strip().lower()
+    return " ".join(h.split()).rstrip(":.–-").strip()
+
+
+def _structure_score(draft: ReportDraft, template: str) -> float:
+    """Deterministic structure grade.
+
+    The Writer's contract is objective — every template section present as
+    a heading, in order — so it is checked mechanically rather than judged.
+    Anchors: 5 = exact template; <=3 = sections present with order/gaps;
+    2 = template ignored. Any heading level counts (the criterion is the
+    section existing, not its depth).
+    """
+    required = [_norm_heading(s) for s in template.split("·") if s.strip()]
+    if not required:
+        return 5.0
+    headings = [
+        _norm_heading(ln)
+        for ln in draft.markdown.splitlines()
+        if ln.lstrip().startswith("#")
+    ]
+    matched = 0
+    for h in headings:
+        if matched < len(required) and h == required[matched]:
+            matched += 1
+    if matched == len(required):
+        return 5.0
+    return min(3.0, 2.0 + matched / len(required))
 
 
 class Rubric(BaseModel):
@@ -116,10 +189,19 @@ class ReviewerWorker:
         self._prompts = prompts
         self._citation_shortcircuit = citation_shortcircuit
 
-    def _prompt(self, brief: Brief, draft: ReportDraft, kept: list[Citation]) -> str:
+    def _prompt(
+        self,
+        brief: Brief,
+        draft: ReportDraft,
+        kept: list[Citation],
+        *,
+        structure_score: float,
+        grounding_note: str,
+    ) -> str:
         reqs = "\n".join(f"- {r}" for r in brief.requirements) or "- (none)"
         cites = "\n".join(
-            f"- [{c.source_url}] {c.claim} (quote: {c.quote[:120]}…)" for c in kept
+            f"- [{c.ref or c.source_url}] {c.claim} (quote: {c.quote[:120]}…)"
+            for c in kept
         ) or "(no supported citations)"
         # Grade structure against the contract the Writer was given — the
         # reviewer previously invented its own outline and demanded sections
@@ -132,7 +214,17 @@ class ReviewerWorker:
             f"audience: {brief.audience}; tone: {brief.tone}\n"
             + (f"Client context: {brief.tenant_context}\n" if brief.tenant_context else "")
             + f"Requirements:\n{reqs}\n"
-            f"Expected section structure: {template}\n\n"
+            f"Expected section structure: {template}\n"
+            f"Mechanical structure check (authoritative — headings verified "
+            f"in code): structure = {structure_score:.1f}/5. Do NOT dispute "
+            f"section presence in feedback; the check already ran.\n"
+            f"Inline `[Sx-Py]` markers in the markdown are citation ids — a "
+            f"sentence carrying one cites the matching entry in the "
+            f"supported-citations list below. Grounding check: a factual "
+            f"sentence is grounded iff its marker appears below AND that "
+            f"entry's claim covers it; unmarked factual sentences are the "
+            f"defect to flag.\n"
+            f"Mechanical marker audit (authoritative): {grounding_note}.\n\n"
             f"Draft v{draft.version} title: {draft.title}\n\n"
             f"{draft.markdown}\n\nSupported citations:\n{cites}"
         )
@@ -205,13 +297,35 @@ class ReviewerWorker:
 
         from app.core.cost_tracking import tracked_structured
 
+        # Semantic adjudication: a quote that exists is not a claim the
+        # quote supports. Citations judged weak block approval until the
+        # Writer re-cites or removes them — claim integrity is checked in
+        # the loop, not assumed. Empty verdicts (offline stubs) are a no-op.
+        claim_verdicts, _claim_rate = await judge_claim_support(
+            kept, judge_llm=self._llm
+        )
+        weak_claims = [
+            c
+            for c, v in zip(kept, claim_verdicts, strict=False)
+            if v != "yes"
+        ]
+
+        template = SECTION_TEMPLATES.get(
+            brief.report_type, SECTION_TEMPLATES["general"]
+        )
+        structure = _structure_score(draft, template)
+        grounding, grounding_note = _grounding_audit(draft, kept)
+        mechanical_grounding = bool(_MARKER_RE.search(draft.markdown))
         system = self._prompts.render("reviewer")
         out = await tracked_structured(
             self._llm,
             ReviewOutput,
             role=self.name,
             system=system.text,
-            user=self._prompt(brief, draft, kept),
+            user=self._prompt(
+                brief, draft, kept,
+                structure_score=structure, grounding_note=grounding_note,
+            ),
             context={
                 "draft_version": draft.version,
                 "prompt_name": system.name,
@@ -224,6 +338,17 @@ class ReviewerWorker:
         # "approve/revise" is advisory (kept in feedback when it disagrees).
         # Approve iff: citation gate passes AND every rubric dimension
         # >= 3.5 AND the rubric mean >= 4.0 (the published bars).
+        # The structure dimension is overridden by the mechanical heading
+        # check — the LLM repeatedly hallucinated missing sections on drafts
+        # that contained every required heading verbatim.
+        out.rubric = Rubric(
+            structure=structure,
+            clarity=out.rubric.clarity,
+            # Marker-traceable drafts get the mechanical audit; free-quote
+            # drafts keep the LLM's grounding judgment.
+            grounding=grounding if mechanical_grounding else out.rubric.grounding,
+            tone=out.rubric.tone,
+        )
         rubric_vals = [
             out.rubric.structure, out.rubric.clarity,
             out.rubric.grounding, out.rubric.tone,
@@ -233,6 +358,7 @@ class ReviewerWorker:
             rate >= _SUPPORT_THRESHOLD
             and min(rubric_vals) >= 3.5
             and rubric_mean >= 4.0
+            and not weak_claims
         )
         verdict_str: Verdict = "approve" if approve else "revise"
         if (out.verdict == "approve") != approve:
@@ -243,13 +369,25 @@ class ReviewerWorker:
         else:
             feedback = []
         feedback += list(out.feedback)
+        if weak_claims:
+            feedback.append(
+                f"{len(weak_claims)} cited claim(s) are not supported by "
+                "their quoted passage — re-cite a passage that literally "
+                "states each claim, or remove the claim: "
+                + "; ".join(
+                    f"[{c.ref or c.source_url}] {c.claim[:80]}"
+                    for c in weak_claims[:5]
+                )
+            )
         if dropped:
             feedback.append(_citation_feedback(dropped, unknown, rate))
 
         verdict = ReviewVerdict(
             draft_version=draft.version,
             verdict=verdict_str,
-            score=min(max(out.score, 1.0), 5.0),
+            # The published metric is the rubric mean — derive it in code
+            # rather than trusting the model's holistic self-score.
+            score=min(max(rubric_mean, 1.0), 5.0),
             rubric=out.rubric.model_dump(),
             feedback=feedback,
             unsupported_citations=dropped,

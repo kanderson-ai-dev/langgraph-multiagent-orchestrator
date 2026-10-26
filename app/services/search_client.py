@@ -5,8 +5,11 @@ when search is disabled entirely.
 """
 
 import asyncio
+import base64
+import binascii
 import json
 from typing import Protocol, runtime_checkable
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from pydantic import BaseModel
@@ -30,6 +33,26 @@ class SearchResult(BaseModel):
     title: str
     url: str
     snippet: str = ""
+
+
+def _unwrap_ad_redirect(url: str) -> str:
+    """Resolve ad-redirect result URLs to their real target.
+
+    ``ddgs``'s Yahoo/Bing backends return ``bing.com/aclick`` hops whose
+    ``u`` parameter carries the destination as base64 prefixed with ``a1``
+    (or ``a2``). Scraping the hop itself is pointless — robots.txt refuses
+    it — so unwrap it; when unwrapping fails the result is unusable and
+    dropped (empty string)."""
+    if "/aclick" not in url:
+        return url
+    token = parse_qs(urlparse(url).query).get("u", [""])[0]
+    if len(token) > 2 and token[:2] in ("a1", "a2"):
+        try:
+            decoded = base64.b64decode(token[2:] + "===").decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError, ValueError):
+            return ""
+        return decoded if decoded.startswith("http") else ""
+    return ""
 
 
 @runtime_checkable
@@ -93,16 +116,20 @@ class DuckDuckGoSearchClient:
             from ddgs import DDGS
 
             with DDGS(timeout=int(self._timeout)) as ddgs:
-                return [
-                    SearchResult(
-                        title=str(r.get("title", "")),
-                        url=str(r.get("href", "")),
-                        snippet=str(r.get("body", "")),
-                    )
-                    for r in ddgs.text(
-                        query, max_results=max_results, backend=self._BACKENDS
-                    )
-                ]
+                results = []
+                for r in ddgs.text(
+                    query, max_results=max_results, backend=self._BACKENDS
+                ):
+                    url = _unwrap_ad_redirect(str(r.get("href", "")))
+                    if url:
+                        results.append(
+                            SearchResult(
+                                title=str(r.get("title", "")),
+                                url=url,
+                                snippet=str(r.get("body", "")),
+                            )
+                        )
+                return results
 
         return await asyncio.to_thread(_sync_search)
 

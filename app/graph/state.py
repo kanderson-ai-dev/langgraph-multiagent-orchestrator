@@ -82,11 +82,17 @@ class EvidenceItem(BaseModel):
 
 
 class Citation(BaseModel):
-    """A claim in the report backed by a verbatim quote from a source."""
+    """A claim in the report backed by a verbatim quote from a source.
+
+    ``ref`` is the passage id (``S<i>-P<j>``) the claim cites in extractive
+    mode — the same marker the Writer puts inline in the markdown, so a
+    reader can resolve marker → claim → source.
+    """
 
     claim: str
     quote: str
     source_url: str
+    ref: str = ""
 
 
 class ReportDraft(BaseModel):

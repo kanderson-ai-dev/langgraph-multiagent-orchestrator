@@ -13,6 +13,7 @@ from app.graph.state import Brief
 from app.services.llm_client import StubLLM
 from app.services.scraper_client import ScrapedPage
 from app.services.search_client import SearchResult
+from tests.conftest import ALL_SECTIONS_MARKDOWN
 
 _HTML = (
     b"<html><title>Src</title><body>RAG systems retrieve documents "
@@ -51,7 +52,7 @@ def _stub_llm(*, verdict: str = "approve") -> StubLLM:
         "DraftOutput",
         lambda s, c: DraftOutput(
             title="Stub Report",
-            markdown="# Stub\nContent grounded in sources.",
+            markdown=ALL_SECTIONS_MARKDOWN,
             citations=[
                 DraftCitation(
                     claim="RAG grounds generation",

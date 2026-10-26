@@ -15,6 +15,7 @@ from app.graph.state import Brief
 from app.services.llm_client import StubLLM
 from app.services.scraper_client import ScrapedPage
 from app.services.search_client import SearchResult
+from tests.conftest import ALL_SECTIONS_MARKDOWN
 
 _HTML = b"<html><body>budget evidence text lives here</body></html>"
 
@@ -48,7 +49,7 @@ class _SpyLLM(StubLLM):
         self.register(
             "DraftOutput",
             lambda s, c: DraftOutput(
-                title="t", markdown="m",
+                title="t", markdown=ALL_SECTIONS_MARKDOWN,
                 citations=[DraftCitation(
                     claim="c", quote="budget evidence text",
                     source_url="https://src.test/a",

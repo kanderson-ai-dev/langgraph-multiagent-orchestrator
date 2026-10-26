@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any, Protocol, TypeVar, runtime_checkable
 
 from langchain_core.runnables import RunnableConfig
+from openai import LengthFinishReasonError
 from pydantic import BaseModel
 
 from app.core.config import Settings
@@ -99,10 +100,17 @@ class OpenAIStructuredLLM:
                     f"@v{context.get('prompt_version', '?')}"
                 ],
             }
-        out = await runnable.ainvoke(
-            [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            config=config,
-        )
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        try:
+            out = await runnable.ainvoke(messages, config=config)
+        except LengthFinishReasonError:
+            # A structured output that hit the completion cap mid-JSON is
+            # a generation accident, not a schema failure — one retry is
+            # cheaper than losing the job.
+            out = await runnable.ainvoke(messages, config=config)
         usage = getattr(out.get("raw"), "usage_metadata", None)
         if context is not None and isinstance(usage, dict):
             context["token_usage"] = {

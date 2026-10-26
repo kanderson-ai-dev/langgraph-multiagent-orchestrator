@@ -320,8 +320,12 @@ def test_promote_blocked_by_real_pipeline_regression(
     detail = r.json()["detail"]
     assert any("rubric_score_avg" in f for f in detail["failures"])
     metrics = detail["metrics"]
-    assert metrics["promoted_metrics"]["rubric_score_avg"] == pytest.approx(4.5)
-    assert metrics["candidate_metrics"]["rubric_score_avg"] == pytest.approx(3.0)
+    # Structure is graded mechanically (5.0 — the stub markdown contains
+    # every template heading); the promoted mean is (5.0+4.5×3)/4 = 4.625.
+    assert metrics["promoted_metrics"]["rubric_score_avg"] == pytest.approx(4.625)
+    # Candidate rubric dims are 3.0 but structure is mechanical (5.0):
+    # the mean is (5.0+3.0×3)/4 = 3.5.
+    assert metrics["candidate_metrics"]["rubric_score_avg"] == pytest.approx(3.5)
     # Under the rubric-derived verdict, a 3.0-scoring reviewer cannot
     # approve — convergence legitimately drops. That IS the regression the
     # promotion gate must see (advisory "approve" no longer masks it).

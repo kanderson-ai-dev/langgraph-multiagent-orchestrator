@@ -63,6 +63,20 @@ def _split_passages(text: str) -> list[str]:
     return passages
 
 
+def _is_prose(passage: str) -> bool:
+    """Real prose contains a decently-long sentence ending in .!?
+
+    Titles, nav rows and listicle chrome ("5 articles / Platform overview")
+    fail this; they must never become citable passages — a model that can
+    only pick real sentences can't attribute a claim to a page heading.
+    A passage that *merges* a heading into a sentence still passes: the
+    heading comes along, but there is prose to cite.
+    """
+    if len(passage) < 120:
+        return False
+    return bool(re.search(r"[A-Za-z][^.!?\n]{30,}[.!?]", passage))
+
+
 def _tokens(text: str) -> list[str]:
     return _TOKEN_RE.findall(text.lower())
 
@@ -106,10 +120,23 @@ def build_passage_index(
     ordered inside each source by score but rendered in document order.
     The global budget trims the lowest-scoring overflow.
     """
+    # The evidence list may carry the same source several times (the
+    # researcher runs once per supervisor round and state accumulates) —
+    # index each unique URL once, else passages duplicate under different
+    # ids and the prompt budget is spent on repeats.
+    unique: list[EvidenceItem] = []
+    seen_urls: set[str] = set()
+    for e in evidence:
+        if e.url not in seen_urls:
+            seen_urls.add(e.url)
+            unique.append(e)
+
     all_passages: list[Passage] = []
     flat_texts: list[str] = []
-    for i, e in enumerate(evidence):
+    for i, e in enumerate(unique):
         for j, ptext in enumerate(_split_passages(e.text)):
+            if not _is_prose(ptext):
+                continue  # headings/nav/list junk is never citable
             all_passages.append(
                 Passage(pid=f"S{i}-P{j}", source_index=i, url=e.url, text=ptext)
             )
@@ -119,7 +146,7 @@ def build_passage_index(
 
     # Top-K per source by score, rendered back in document order.
     kept: list[Passage] = []
-    for i in range(len(evidence)):
+    for i in range(len(unique)):
         mine = [p for p in all_passages if p.source_index == i]
         mine.sort(key=lambda p: -p.score)
         kept.extend(sorted(mine[:per_source_k], key=lambda p: int(p.pid.split("-P")[1])))
@@ -132,7 +159,11 @@ def build_passage_index(
     kept.sort(key=lambda p: (p.source_index, int(p.pid.split("-P")[1])))
 
     return PassageIndex(
-        passages=kept, by_id={p.pid: p for p in kept}
+        passages=kept,
+        # Resolve against ALL source passages, not only the rendered top-K:
+        # specialists and revision rounds may cite a valid id that the
+        # budget trimmed from the prompt — it still maps to real evidence.
+        by_id={p.pid: p for p in all_passages},
     )
 
 

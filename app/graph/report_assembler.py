@@ -20,10 +20,19 @@ def assemble_report(state: dict[str, Any]) -> str | None:
     evidence = state.get("evidence", [])
     kept, _dropped, hashes, _unknown = verify_citations(draft, evidence)
 
-    parts = [f"# {draft.title}", "", draft.markdown.strip()]
+    # The draft's own `## Sources` (required by the section template but
+    # author-invented) is replaced by the canonical verified list below —
+    # otherwise the report would carry two Sources sections.
+    md_lines = draft.markdown.strip().splitlines()
+    for i, ln in enumerate(md_lines):
+        if ln.lstrip().startswith("#") and ln.lstrip("#").strip().lower() == "sources":
+            md_lines = md_lines[:i]
+            break
+    parts = [f"# {draft.title}", "", "\n".join(md_lines).strip()]
     if kept:
         parts += ["", "## Sources", ""]
         for c, h in zip(kept, hashes, strict=True):
             short = f" `#{h[:12]}`" if h else ""
-            parts.append(f"- {c.claim} — {c.source_url}{short}")
+            ref = f"[{c.ref}] " if c.ref else ""
+            parts.append(f"- {ref}{c.claim} — {c.source_url}{short}")
     return "\n".join(parts).strip() + "\n"

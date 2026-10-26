@@ -104,6 +104,7 @@ def build_all_workers(
         ResearcherWorker(
             llm, search, scraper, prompts,
             max_queries=settings.max_sub_questions,
+            max_results_per_query=settings.search_max_results,
             scrape_top_k=settings.research_scrape_top_k,
         ),
         WriterWorker(

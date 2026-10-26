@@ -31,7 +31,11 @@ def _evidence() -> list[EvidenceItem]:
             evidence_id="e1",
             url="https://src.test/rag",
             title="RAG overview",
-            text="RAG systems retrieve documents to ground generation in sources.",
+            text=(
+                "RAG systems retrieve documents to ground generation in "
+                "sources, which enterprises report improves answer accuracy "
+                "and reduces unsupported claims substantially in production."
+            ),
         )
     ]
 
@@ -239,3 +243,64 @@ async def test_writer_revision_prompt_shows_previous_draft(
     assert "THE OLD DRAFT XYZ" in captured["user"]
     assert "MINIMAL" in captured["user"]
     assert "fix citations" in captured["user"]
+
+
+# ─── mechanical rubric dimensions ────────────────────────────────────────────
+
+
+def test_structure_score_full_template() -> None:
+    from app.graph.nodes.reviewer import _structure_score
+    from app.graph.teams import SECTION_TEMPLATES
+    from tests.conftest import ALL_SECTIONS_MARKDOWN
+
+    draft = ReportDraft(version=1, title="t", markdown=ALL_SECTIONS_MARKDOWN)
+    for tpl in SECTION_TEMPLATES.values():
+        assert _structure_score(draft, tpl) == 5.0
+
+
+def test_structure_score_missing_section() -> None:
+    from app.graph.nodes.reviewer import _structure_score
+    from app.graph.teams import SECTION_TEMPLATES
+
+    md = "## Executive Summary\nx.\n## Findings\ny.\n## Sources\nz."
+    draft = ReportDraft(version=1, title="t", markdown=md)
+    score = _structure_score(draft, SECTION_TEMPLATES["general"])
+    assert score <= 3.0
+
+
+def test_grounding_audit_all_markers_resolve() -> None:
+    from app.graph.nodes.reviewer import _grounding_audit
+
+    draft = ReportDraft(
+        version=1, title="t",
+        markdown="Fact one [S0-P1]. Fact two [S1-P2].",
+        citations=[
+            Citation(claim="a", quote="q", source_url="u1", ref="S0-P1"),
+            Citation(claim="b", quote="q", source_url="u2", ref="S1-P2"),
+        ],
+    )
+    score, note = _grounding_audit(draft, list(draft.citations))
+    assert score == 5.0 and "resolve" in note
+
+
+def test_grounding_audit_unresolved_marker_penalized() -> None:
+    from app.graph.nodes.reviewer import _grounding_audit
+
+    draft = ReportDraft(
+        version=1, title="t",
+        markdown="Fact [S0-P1] and another [S9-P9].",
+        citations=[Citation(claim="a", quote="q", source_url="u", ref="S0-P1")],
+    )
+    score, note = _grounding_audit(draft, list(draft.citations))
+    assert score < 5.0 and "S9-P9" in note
+
+
+def test_grounding_audit_no_markers_caps() -> None:
+    from app.graph.nodes.reviewer import _grounding_audit
+
+    draft = ReportDraft(
+        version=1, title="t", markdown="Factual text, no markers.",
+        citations=[Citation(claim="a", quote="q", source_url="u")],
+    )
+    score, _ = _grounding_audit(draft, list(draft.citations))
+    assert score == 3.0
