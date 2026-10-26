@@ -13,6 +13,7 @@ never assumed.
 import re
 from typing import Any
 
+import structlog
 from pydantic import BaseModel, Field
 
 from app.core.metrics import DEBATE_ROUNDS_TOTAL
@@ -36,6 +37,10 @@ from app.services.llm_client import StructuredLLM
 from app.services.prompt_registry import PromptRegistry
 
 _SUPPORT_THRESHOLD = EDD_THRESHOLDS["citation_support_rate"]
+# In-loop ship bar for thin support: a draft may carry 'partly' claims
+# while fully-supported citations are a solid majority — the published
+# gate is a cross-case average, not a per-draft perfection requirement.
+_CLAIM_SHIP_MIN = 2 / 3
 
 
 def _citation_feedback(dropped: int, unknown: int, rate: float) -> str:
@@ -184,10 +189,16 @@ class ReviewerWorker:
         prompts: PromptRegistry,
         *,
         citation_shortcircuit: bool = True,
+        claim_judge: StructuredLLM | None = None,
     ) -> None:
         self._llm = llm
         self._prompts = prompts
         self._citation_shortcircuit = citation_shortcircuit
+        # The in-loop claim adjudicator must apply the same strictness the
+        # eval gate measures — so it runs on the judge model (gpt-4o), not
+        # the worker model. Falls back to the worker LLM offline so stub
+        # builders still drive tests.
+        self._claim_judge = claim_judge or llm
 
     def _prompt(
         self,
@@ -301,14 +312,35 @@ class ReviewerWorker:
         # quote supports. Citations judged weak block approval until the
         # Writer re-cites or removes them — claim integrity is checked in
         # the loop, not assumed. Empty verdicts (offline stubs) are a no-op.
-        claim_verdicts, _claim_rate = await judge_claim_support(
-            kept, judge_llm=self._llm
+        claim_verdicts, claim_rate = await judge_claim_support(
+            kept, judge_llm=self._claim_judge
+        )
+        structlog.get_logger().info(
+            "claim_adjudication",
+            draft_version=draft.version,
+            verdicts=claim_verdicts,
+            rate=round(claim_rate, 3),
         )
         weak_claims = [
             c
             for c, v in zip(kept, claim_verdicts, strict=False)
             if v != "yes"
         ]
+        # 'no' = the quote is unrelated or contradicting — a wrong citation,
+        # never shippable. 'partly' = thin support — tolerable while clearly
+        # a minority: the published gate is an AVERAGE over cases (≥0.85),
+        # so demanding that share per-draft is stricter than the contract
+        # and makes thin-evidence cases non-convergent by construction
+        # (1 partly in 6 citations is 0.833 — unreachable). The ship bar:
+        # nothing wrong cited AND a solid majority fully supported.
+        no_claims = [
+            c
+            for c, v in zip(kept, claim_verdicts, strict=False)
+            if v == "no"
+        ]
+        claims_ok = not claim_verdicts or (
+            not no_claims and claim_rate >= _CLAIM_SHIP_MIN
+        )
 
         template = SECTION_TEMPLATES.get(
             brief.report_type, SECTION_TEMPLATES["general"]
@@ -358,7 +390,7 @@ class ReviewerWorker:
             rate >= _SUPPORT_THRESHOLD
             and min(rubric_vals) >= 3.5
             and rubric_mean >= 4.0
-            and not weak_claims
+            and claims_ok
         )
         verdict_str: Verdict = "approve" if approve else "revise"
         if (out.verdict == "approve") != approve:
@@ -370,13 +402,28 @@ class ReviewerWorker:
             feedback = []
         feedback += list(out.feedback)
         if weak_claims:
+            blocking = "; ".join(
+                f"[{c.ref or c.source_url}] {c.claim[:80]}" for c in no_claims
+            )
+            partly = "; ".join(
+                f"[{c.ref or c.source_url}] {c.claim[:80]}"
+                for c, v in zip(kept, claim_verdicts, strict=False)
+                if v == "partly"
+            )
             feedback.append(
-                f"{len(weak_claims)} cited claim(s) are not supported by "
-                "their quoted passage — re-cite a passage that literally "
-                "states each claim, or remove the claim: "
-                + "; ".join(
-                    f"[{c.ref or c.source_url}] {c.claim[:80]}"
-                    for c in weak_claims[:5]
+                f"Cited claims not fully supported by their quoted passage "
+                f"(claim-support {claim_rate:.2f}). "
+                + (
+                    f"BLOCKING — unrelated or contradicting citations, "
+                    f"remove them or delete the claim: {blocking}. "
+                    if no_claims
+                    else ""
+                )
+                + (
+                    f"Thin support — restate the claim as the quote's "
+                    f"literal content or remove it: {partly}."
+                    if partly
+                    else ""
                 )
             )
         if dropped:
@@ -391,6 +438,7 @@ class ReviewerWorker:
             rubric=out.rubric.model_dump(),
             feedback=feedback,
             unsupported_citations=dropped,
+            weak_claims=len(weak_claims),
         )
 
         msg = AgentMessage(

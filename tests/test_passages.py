@@ -55,3 +55,25 @@ def test_render_groups_by_source() -> None:
     assert "[S0-P" in out
     assert build_passage_index([], "q").passages == []
     assert render_passages(build_passage_index([], "q")) == "(no evidence gathered)"
+
+
+def test_chrome_fragment_with_fused_sentence_is_not_citable() -> None:
+    """Listicle chrome fused to one trailing sentence must not pass the
+    prose check — those fragments produce citations a judge can only call
+    'partly' at best."""
+    junk = EvidenceItem(
+        evidence_id="j",
+        url="https://j.test/p",
+        text=(
+            "Key features\n:\nAdvanced automation\nSupport for 20+ "
+            "compliance frameworks\nContinuous monitoring\nPricing\nContact "
+            "sales\nThe platform also offers dashboards for review purposes."
+        ),
+    )
+    idx = build_passage_index([junk, *_ev()], "compliance dashboards")
+    assert not any(p.source_index == 0 for p in idx.passages)
+
+
+def test_full_prose_passage_still_passes() -> None:
+    idx = build_passage_index(_ev(), "RAG")
+    assert idx.passages  # real sentence blocks survive the coverage check

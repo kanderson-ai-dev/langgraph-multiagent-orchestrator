@@ -198,14 +198,17 @@ def _wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float] | None:
     return round((centre - margin) / denom, 4), round((centre + margin) / denom, 4)
 
 
-def _gate_report(agg: dict[str, float]) -> dict[str, dict[str, Any]]:
+def _gate_report(
+    agg: dict[str, float], thresholds: dict[str, float] | None = None
+) -> dict[str, dict[str, Any]]:
+    th = EDD_THRESHOLDS if thresholds is None else thresholds
     return {
         metric: {
             "value": round(agg.get(metric, 0.0), 4),
             "threshold": threshold,
             "pass": agg.get(metric, 0.0) >= threshold,
         }
-        for metric, threshold in EDD_THRESHOLDS.items()
+        for metric, threshold in th.items()
     }
 
 
@@ -453,6 +456,13 @@ async def _run_once(
     )
     normal = [r for r in results if not r["expected_blocked"]]
     blocked = [r for r in results if r["expected_blocked"]]
+    # The claim-support gate is meaningful only where a judge adjudicated —
+    # live runs. Stub runs produce empty verdict sets, so the metric is
+    # dropped from the gate set rather than scored 0.
+    gate_thresholds = dict(EDD_THRESHOLDS)
+    if not (args.live and normal_rates):
+        gate_thresholds.pop("claim_support_rate_avg", None)
+    gates = _gate_report(agg, gate_thresholds)
     run = {
         "run_index": run_index,
         "dataset": "heldout" if args.heldout else "dev",
@@ -482,26 +492,9 @@ async def _run_once(
                 len(normal),
             ),
         },
-        "gates": {
-            **_gate_report(agg),
-            # D3 integrity guard — only meaningful on live runs where the
-            # judge actually judged; stub runs produce an empty verdict set.
-            **(
-                {
-                    "claim_support_rate_avg": {
-                        "value": round(agg["claim_support_rate_avg"], 4),
-                        "threshold": 0.85,
-                        "pass": agg["claim_support_rate_avg"] >= 0.85,
-                    }
-                }
-                if args.live and normal_rates
-                else {}
-            ),
-        },
+        "gates": gates,
         "spend_usd": round(spent[0], 4),
-        "passed": (
-            all(g["pass"] for g in _gate_report(agg).values()) and not aborted
-        ),
+        "passed": all(g["pass"] for g in gates.values()) and not aborted,
     }
     return run
 

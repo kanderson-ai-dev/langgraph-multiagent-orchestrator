@@ -21,6 +21,7 @@ def test_thresholds_are_pinned() -> None:
         "judge_score_avg": 4.0,
         "debate_convergence_rate": 0.85,
         "blocked_rate": 1.0,
+        "claim_support_rate_avg": 0.85,
     }
 
 

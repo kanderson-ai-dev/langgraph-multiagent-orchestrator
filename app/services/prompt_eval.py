@@ -558,6 +558,13 @@ def promotion_gate(
     """
     failures: list[str] = []
     for metric, threshold in EDD_THRESHOLDS.items():
+        if metric not in ab.candidate_metrics and metric not in (
+            ab.promoted_metrics
+        ):
+            # A metric the eval pipeline never produced (e.g. claim
+            # support, which needs a live judge model) is "not measured",
+            # not zero — the live gate enforces it where it is measured.
+            continue
         value = ab.candidate_metrics.get(metric, 0.0)
         base = ab.promoted_metrics.get(metric, 0.0)
         allowed_epsilon = epsilon if metric in _SCORE_METRICS else 0.0

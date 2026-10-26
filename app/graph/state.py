@@ -114,6 +114,9 @@ class ReviewVerdict(BaseModel):
     rubric: dict[str, float] = Field(default_factory=dict)
     feedback: list[str] = Field(default_factory=list)
     unsupported_citations: int = Field(default=0, ge=0)
+    # Citations whose quote exists but does not support the claim —
+    # counted by the reviewer's semantic adjudication.
+    weak_claims: int = Field(default=0, ge=0)
 
 
 class AnalystNote(BaseModel):

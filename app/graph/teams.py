@@ -98,6 +98,7 @@ def build_all_workers(
     from app.graph.nodes.reviewer import ReviewerWorker
     from app.graph.nodes.specialist import SpecialistWorker
     from app.graph.nodes.writer import WriterWorker
+    from app.services.llm_client import build_judge_llm
 
     overrides = llm_overrides or {}
     workers: list[Worker] = [
@@ -114,6 +115,15 @@ def build_all_workers(
         ReviewerWorker(
             overrides.get("reviewer", llm), prompts,
             citation_shortcircuit=settings.reviewer_citation_shortcircuit,
+            # In-loop claim adjudication runs on the judge model so the
+            # debate optimizes for the same strictness the gate measures.
+            # Offline there is no key — the reviewer falls back to its own
+            # (stub) LLM and adjudication is a no-op.
+            claim_judge=(
+                build_judge_llm(settings)
+                if settings.openai_api_key is not None
+                else None
+            ),
         ),
     ]
     for name, description in SPECIALIST_ROLES.items():

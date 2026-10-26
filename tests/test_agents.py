@@ -195,7 +195,9 @@ async def test_writer_extractive_mode_resolves_passage_ids(
             title="RAG Adoption",
             markdown="# RAG Adoption",
             citations=[
-                PassageCitation(claim="grounded", passage_id="S0-P0"),
+                PassageCitation(
+                    claim="RAG systems retrieve documents", passage_id="S0-P0"
+                ),
                 PassageCitation(claim="bogus", passage_id="S9-P9"),
             ],
         ),
@@ -210,6 +212,102 @@ async def test_writer_extractive_mode_resolves_passage_ids(
     assert good.quote in _evidence()[0].text
     assert good.source_url == _evidence()[0].url
     assert bad.source_url == "passage:S9-P9" and bad.quote == ""
+
+
+async def test_writer_keeps_weak_claims_for_adjudication(
+    brief: Brief, prompts: Any
+) -> None:
+    """A claim whose content words aren't in the quote is inference
+    attached to a topical passage — it stays cited so the semantic claim
+    adjudicator can flag it; lexical coverage never deletes citations."""
+    stub = StubLLM()
+    stub.register(
+        "DraftOutputPassages",
+        lambda s, c: DraftOutputPassages(
+            title="RAG Adoption",
+            markdown=(
+                "# RAG Adoption\n"
+                "RAG systems retrieve documents [S0-P0]. "
+                "Enterprises should probably pilot governance tooling "
+                "before scaling [S0-P0]."
+            ),
+            citations=[
+                PassageCitation(
+                    claim="RAG systems retrieve documents", passage_id="S0-P0"
+                ),
+                PassageCitation(
+                    claim=(
+                        "enterprises should pilot governance tooling before "
+                        "scaling cautiously"
+                    ),
+                    passage_id="S0-P0",
+                ),
+            ],
+        ),
+    )
+    w = WriterWorker(llm=stub, prompts=prompts, citation_mode="extractive")
+    out = await w.run({"brief": brief, "evidence": _evidence()})
+    draft: ReportDraft = out["drafts"][0]
+    # Both entries survive for the claim judge; markers stay put.
+    assert len(draft.citations) == 2
+    assert draft.markdown.count("[S0-P0]") == 2
+
+
+async def test_writer_remaps_claim_to_stating_passage(
+    brief: Brief, prompts: Any
+) -> None:
+    """Right claim, wrong passage: a citation whose claim clearly matches a
+    different passage gets re-pointed there and its marker rewritten."""
+    ev = _evidence() + [
+        EvidenceItem(
+            evidence_id="e2",
+            url="https://src.test/pricing",
+            title="Pricing",
+            text=(
+                "Usage-based pricing charges customers for actual "
+                "consumption rather than seats, which finance teams report "
+                "improves cost alignment in production systems."
+            ),
+            query="",
+            sha256="x",
+            content_type="text/html",
+        )
+    ]
+    stub = StubLLM()
+    stub.register(
+        "DraftOutputPassages",
+        lambda s, c: DraftOutputPassages(
+            title="T",
+            markdown=(
+                "# T\n"
+                "RAG systems retrieve documents [S0-P0]. "
+                "Usage-based pricing charges customers for actual "
+                "consumption [S0-P0]."
+            ),
+            citations=[
+                PassageCitation(
+                    claim="RAG systems retrieve documents", passage_id="S0-P0"
+                ),
+                PassageCitation(
+                    claim=(
+                        "usage-based pricing charges customers for actual "
+                        "consumption"
+                    ),
+                    passage_id="S0-P0",
+                ),
+            ],
+        ),
+    )
+    w = WriterWorker(llm=stub, prompts=prompts, citation_mode="extractive")
+    out = await w.run({"brief": brief, "evidence": ev})
+    draft: ReportDraft = out["drafts"][0]
+    assert len(draft.citations) == 2
+    assert draft.citations[0].ref == "S0-P0"
+    assert draft.citations[1].ref == "S1-P0"
+    assert draft.citations[1].source_url == "https://src.test/pricing"
+    assert draft.citations[1].quote == ev[1].text
+    assert "[S1-P0]" in draft.markdown
+    assert draft.markdown.count("[S0-P0]") == 1
 
 
 async def test_writer_revision_prompt_shows_previous_draft(
@@ -304,3 +402,152 @@ def test_grounding_audit_no_markers_caps() -> None:
     )
     score, _ = _grounding_audit(draft, list(draft.citations))
     assert score == 3.0
+
+
+def _verdict_stub(verdicts: list[str]) -> "StubLLM":
+    from app.graph.claim_support import ClaimVerdicts
+
+    stub = StubLLM()
+    stub.register(
+        "ReviewOutput",
+        lambda s, c: ReviewOutput(
+            verdict="approve",
+            score=4.5,
+            rubric={
+                "structure": 4.5, "clarity": 4.5, "grounding": 4.5, "tone": 4.5
+            },
+            feedback=[],
+        ),
+    )
+    stub.register(
+        "ClaimVerdicts",
+        lambda s, c, verdicts=verdicts: ClaimVerdicts(verdicts=verdicts),
+    )
+    return stub
+
+
+def _verified_draft(n: int) -> ReportDraft:
+    """Draft whose citations all mechanically verify against _evidence()."""
+    from tests.conftest import ALL_SECTIONS_MARKDOWN
+
+    text = _evidence()[0].text
+    cites = [
+        Citation(
+            claim=f"claim {i}", quote=text[i * 10 : i * 10 + 40].strip(),
+            source_url="https://src.test/rag", ref=f"S0-P{i}",
+        )
+        for i in range(n)
+    ]
+    return ReportDraft(
+        version=1, title="t",
+        markdown=ALL_SECTIONS_MARKDOWN
+        + "\n"
+        + " ".join(f"Fact {i} [S0-P{i}]." for i in range(n)),
+        citations=cites,
+    )
+
+
+async def test_reviewer_blocks_on_no_claim_verdict(
+    brief: Brief, prompts: Any
+) -> None:
+    """A 'no' verdict (unrelated/contradicting quote) blocks approval even
+    when the yes-share would otherwise pass the gate bar."""
+    n = 8
+    stub = _verdict_stub(["yes"] * (n - 1) + ["no"])
+    w = ReviewerWorker(llm=stub, prompts=prompts)
+    out = await w.run(
+        {"brief": brief, "evidence": _evidence(), "drafts": [_verified_draft(n)]}
+    )
+    v: ReviewVerdict = out["latest_verdict"]
+    assert v.verdict == "revise"
+    assert v.weak_claims == 1
+    assert any("BLOCKING" in f for f in v.feedback)
+
+
+async def test_reviewer_tolerates_partly_within_gate_share(
+    brief: Brief, prompts: Any
+) -> None:
+    """'partly' is thin support, not a wrong citation — tolerated while
+    fully-supported citations are a solid majority (≥2/3 ship bar)."""
+    n = 8
+    stub = _verdict_stub(["yes"] * (n - 1) + ["partly"])
+    w = ReviewerWorker(llm=stub, prompts=prompts)
+    out = await w.run(
+        {"brief": brief, "evidence": _evidence(), "drafts": [_verified_draft(n)]}
+    )
+    assert out["latest_verdict"].verdict == "approve"
+
+
+async def test_reviewer_blocks_below_claim_rate(
+    brief: Brief, prompts: Any
+) -> None:
+    """A yes-share below the 2/3 ship bar is revise even without 'no'
+    verdicts — a draft where half its citations are weak is not shippable."""
+    n = 4
+    stub = _verdict_stub(["yes", "yes", "partly", "partly"])
+    w = ReviewerWorker(llm=stub, prompts=prompts)
+    out = await w.run(
+        {"brief": brief, "evidence": _evidence(), "drafts": [_verified_draft(n)]}
+    )
+    assert out["latest_verdict"].verdict == "revise"
+
+
+async def test_claim_support_verbatim_claim_skips_judge() -> None:
+    """A verbatim-substring claim is 'yes' by definition — no judge call.
+    Spaceless matching rescues quotes whose whitespace extraction ate."""
+    from app.graph.claim_support import ClaimVerdicts, judge_claim_support
+
+    quote = (
+        "Usage-Based vs Seat-Based Pricing for APIs. Picking a billing axis "
+        "is the single most consequential decision in your pricing model, "
+        "and for an API-first product it usually comes down to usage-based."
+    )
+    cits = [
+        Citation(
+            claim=(
+                "Picking a billing axis is the single most consequential "
+                "decision in your pricing model"
+            ),
+            quote=quote,
+            source_url="https://x.test",
+        ),
+        Citation(
+            claim=(
+                "The report recommends evaluating both models carefully "
+                "before rolling out any pricing change across the base"
+            ),
+            quote=quote,
+            source_url="https://x.test",
+        ),
+    ]
+    stub = StubLLM()
+    stub.register(
+        "ClaimVerdicts", lambda s, c: ClaimVerdicts(verdicts=["no"])
+    )
+    verdicts, rate = await judge_claim_support(cits, judge_llm=stub)
+    assert verdicts == ["yes", "no"]  # auto-yes merged with the judged item
+    assert rate == 0.5
+
+
+async def test_claim_support_all_verbatim_needs_no_judge() -> None:
+    """All-verbatim citations adjudicate without any judge call at all."""
+    from app.graph.claim_support import judge_claim_support
+
+    quote = (
+        "In 2023 a global logistics giant lostover200millionafter a cloud "
+        "vulnerability exposed real time data from 300 warehouses worldwide."
+    )
+    cits = [
+        Citation(
+            claim=(
+                "In 2023, a global logistics giant lost over $200 million "
+                "after a cloud vulnerability exposed real-time data from "
+                "300 warehouses"
+            ),
+            quote=quote,
+            source_url="https://x.test",
+        ),
+    ]
+    verdicts, rate = await judge_claim_support(cits, judge_llm=StubLLM())
+    assert verdicts == ["yes"]
+    assert rate == 1.0

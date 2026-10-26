@@ -267,42 +267,30 @@ def build_graph(
                 nxt = reviewer.name
                 reason = f"new draft v{drafts[-1].version} pending review"
             else:
-                # Early exit: a high-scoring draft whose citations all
-                # verified doesn't earn another paid writer round.
-                threshold = settings.review_early_exit_score
-                early_exit = (
-                    verdict.verdict == "revise"
-                    and threshold is not None
-                    and verdict.score >= threshold
-                    and verdict.unsupported_citations == 0
+                # Debate bound is deterministic — never left to the decider.
+                # A `revise` verdict always returns to the Writer while rounds
+                # remain: semantic claim adjudication means a high-scoring
+                # revise still names a concrete, fixable deficiency, so the
+                # old "early exit on clean citations" shortcut only shipped
+                # non-converged drafts the debate could have repaired.
+                nxt = decide_next_after_verdict(
+                    approved=verdict.verdict == "approve",
+                    rounds_used=rounds,
+                    max_rounds=max_rounds,
+                    proposer=writer.name,
                 )
-                if early_exit:
-                    nxt = FINISH
+                if nxt == writer.name:
                     reason = (
-                        f"Early exit — reviewer scored {verdict.score:.1f} "
-                        f"(≥{threshold}) with all citations verified; "
-                        "skipping another debate round."
+                        f"Revision requested (round {rounds}/{max_rounds}) — "
+                        "sending the draft back to the Writer."
                     )
+                elif verdict.verdict == "approve":
+                    reason = "Draft approved — assembling the final report."
                 else:
-                    # Debate bound is deterministic — never left to the decider.
-                    nxt = decide_next_after_verdict(
-                        approved=verdict.verdict == "approve",
-                        rounds_used=rounds,
-                        max_rounds=max_rounds,
-                        proposer=writer.name,
+                    reason = (
+                        f"Debate budget exhausted ({rounds}/{max_rounds} "
+                        "rounds) — escalating to human review."
                     )
-                    if nxt == writer.name:
-                        reason = (
-                            f"Revision requested (round {rounds}/{max_rounds}) — "
-                            "sending the draft back to the Writer."
-                        )
-                    elif verdict.verdict == "approve":
-                        reason = "Draft approved — assembling the final report."
-                    else:
-                        reason = (
-                            f"Debate budget exhausted ({rounds}/{max_rounds} "
-                            "rounds) — escalating to human review."
-                        )
         else:
             # The decider only sees (and may only pick) this job's team —
             # minus any worker that already hit its dispatch cap. A worker

@@ -187,9 +187,11 @@ def test_ab_test_runs_real_eval(client: TestClient) -> None:
     assert body["promoted_metrics"]["citation_support_rate"] == 1.0
     assert body["candidate_metrics"]["rubric_score_avg"] > 0
     # Gated metrics are deterministic under the stub — zero deltas.
-    # (Informational metrics like latency legitimately differ per run.)
+    # (Informational metrics like latency legitimately differ per run;
+    # metrics the stub eval never produces, e.g. claim support, are
+    # simply absent from deltas.)
     for metric in EDD_THRESHOLDS:
-        assert body["deltas"][metric] == 0, metric
+        assert body["deltas"].get(metric, 0) == 0, metric
 
 
 def test_ab_test_unknown_version(client: TestClient) -> None:

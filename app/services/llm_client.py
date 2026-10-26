@@ -59,7 +59,7 @@ class OpenAIStructuredLLM:
             # Transient 429/5xx retry with exponential backoff — parallel jobs
             # can briefly saturate the org TPM limit mid-run.
             max_retries=self.max_retries,
-            **seed_kwargs,  # type: ignore[arg-type]
+            **seed_kwargs,
         )
         # Bounded outputs: schemas already cap completion size; the setting
         # is an extra seatbelt when configured (None = provider default).

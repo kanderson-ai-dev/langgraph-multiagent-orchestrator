@@ -5,8 +5,10 @@ Reviewer's feedback explicitly. Citations carry verbatim quotes so the
 Reviewer can verify them against fetched source text.
 """
 
+import re
 from typing import Any
 
+import structlog
 from pydantic import BaseModel, Field
 
 from app.framework.worker import StateUpdate
@@ -22,6 +24,8 @@ from app.graph.state import (
 from app.graph.teams import SECTION_TEMPLATES
 from app.services.llm_client import StructuredLLM
 from app.services.prompt_registry import PromptRegistry
+
+logger = structlog.get_logger()
 
 
 class DraftCitation(BaseModel):
@@ -49,11 +53,49 @@ class DraftOutput(BaseModel):
 
 
 class DraftOutputPassages(BaseModel):
-    """Extractive-mode output — same shape, passage ids instead of quotes."""
+    """Extractive-mode output — same shape, passage ids instead of quotes.
+
+    Field order is load-bearing: the model emits ``citations`` BEFORE
+    ``markdown``, so it must select the passage facts it will cite first and
+    then write sentences around them — cite-then-write, not write-then-cite.
+    Prose drafted before citation selection drifts into inference and the
+    claim judge flags it.
+    """
 
     title: str
-    markdown: str
     citations: list[PassageCitation] = Field(default_factory=list)
+    markdown: str
+
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_STOPWORDS = frozenset(
+    [
+        "the", "a", "an", "of", "to", "in", "and", "or", "for", "with",
+        "by", "on", "as", "at", "is", "are", "was", "were", "be", "been",
+        "that", "this", "it", "its", "from", "into", "can", "could", "may",
+        "might", "should", "would", "will", "shall", "not", "no", "than",
+        "then", "so", "such", "also", "more", "most", "other", "others",
+        "over", "under", "between", "their", "his", "her", "our", "your",
+        "we", "they", "he", "she", "you", "i",
+    ]
+)
+# A citation's claim must restate the quote — if most of its content words
+# are absent from the quoted passage, the claim is the Writer's inference
+# attached to a topical passage (the class the claim judge flags). Sixty
+# percent tolerates synonym rephrasing ("annual fee" ~ "per year").
+_CLAIM_COVERAGE_MIN = 0.6
+
+
+def _claim_coverage(claim: str, quote: str) -> float:
+    """Share of the claim's content tokens present in the quoted passage."""
+    claim_tokens = [
+        t for t in _TOKEN_RE.findall(claim.lower()) if t not in _STOPWORDS
+    ]
+    if not claim_tokens:
+        return 1.0
+    quote_tokens = set(_TOKEN_RE.findall(quote.lower()))
+    hits = sum(1 for t in claim_tokens if t in quote_tokens)
+    return hits / len(claim_tokens)
 
 
 class WriterWorker:
@@ -84,7 +126,10 @@ class WriterWorker:
         query = " ".join(
             [brief.topic, *brief.requirements, *state.get("sub_questions", [])]
         )
-        index = build_passage_index(evidence, query)
+        # Generous budget: the Writer drafts one report and should see
+        # enough distinct facts to build depth — starving it to ~9 passages
+        # produced thin reports that repeat the same two sources.
+        index = build_passage_index(evidence, query, per_source_k=4, char_budget=10000)
         ev_block = render_passages(index)
         reqs = "\n".join(f"- {r}" for r in brief.requirements) or "- (none)"
         template = SECTION_TEMPLATES.get(
@@ -123,26 +168,43 @@ class WriterWorker:
             items = "\n".join(f"- {f}" for f in verdict.feedback)
             prev = state.get("drafts", [])
             prev_md = prev[-1].markdown[:6000] if prev else "(none)"
+            prev_cites = ""
+            if prev and prev[-1].citations:
+                listed = "\n".join(
+                    f'- "{c.claim}" → {c.ref or c.source_url}'
+                    for c in prev[-1].citations
+                    if c.ref
+                )
+                if listed:
+                    prev_cites = (
+                        "\nAlready-adjudicated citation entries — reuse these "
+                        "claim/passage_id pairs VERBATIM for every sentence you "
+                        "keep; do not re-write them:\n" + listed
+                    )
             feedback = (
                 f"\n\nThis is revision round {rounds + 1}. Your previous "
                 f"draft is below — apply MINIMAL, targeted edits and keep "
                 f"every citation that was already verified.\n"
                 f"--- previous draft v{len(prev)} ---\n{prev_md}\n"
-                f"--- end previous draft ---\n"
+                f"--- end previous draft ---"
+                f"{prev_cites}\n"
                 f"The Reviewer's feedback you MUST address:\n{items}"
             )
         cite_rule = (
-            "\n\nCitations: for every factual claim, cite the passage id "
-            "(e.g. S0-P2) shown in brackets before the passage — the passage "
-            "text must directly state that claim, and the claim text you "
-            "record must restate only what that passage states (no numbers, "
-            "names or scope beyond it). Put the SAME marker inline in the "
-            "markdown right after the sentence it backs: `... 69% of firms "
-            "report X [S0-P2].` Do NOT retype quotes; the system attaches "
-            "the exact text. Never cite a passage that only mentions the "
-            "topic; prefer passages containing the concrete fact. Specialist "
-            "analyst notes are context, not evidence — the only valid "
-            "citation targets are `[Sx-Py]` passage ids."
+            "\n\nCitations — CITE FIRST, THEN WRITE: you emit `citations` "
+            "before `markdown`, so FIRST pick the 6–10 passage facts the "
+            "report will stand on (claim in the passage's own words, "
+            "passage_id like S0-P2), THEN write the markdown so each chosen "
+            "claim appears as a sentence carrying its marker inline, e.g. "
+            "`... 69% of firms report X [S0-P2].` The passage text must "
+            "directly state the claim — no numbers, names or scope beyond "
+            "it. Do NOT retype quotes; the system attaches the exact text. "
+            "Never cite a passage that only mentions the topic; prefer "
+            "passages containing the concrete fact — numbers, dates, named "
+            "companies, measured outcomes over qualitative filler. "
+            "Specialist analyst "
+            "notes are context, not evidence — the only valid citation "
+            "targets are `[Sx-Py]` passage ids."
             if self._citation_mode == "extractive"
             else ""
         )
@@ -185,34 +247,86 @@ class WriterWorker:
             },
         )
         citations: list[Citation] = []
+        dead_markers: list[str] = []
+        # (old pid, new pid) pairs in document order — markers are rewritten
+        # positionally, like dead-marker removal.
+        remapped: list[tuple[str, str]] = []
         for c in out.citations:
-            if extractive:
-                p = index.resolve(getattr(c, "passage_id", ""))
-                if p is not None:
-                    citations.append(
-                        Citation(
-                            claim=c.claim, quote=p.text,
-                            source_url=p.url, ref=p.pid,
-                        )
-                    )
-                else:
-                    # Unknown id → counted as an unknown-URL citation by the
-                    # verifier, exactly like a hallucinated source.
-                    citations.append(
-                        Citation(
-                            claim=c.claim,
-                            quote="",
-                            source_url=f"passage:{getattr(c, 'passage_id', '?')}",
-                        )
-                    )
-            else:
+            if not extractive:
                 citations.append(
                     Citation(claim=c.claim, quote=c.quote, source_url=c.source_url)
+                )
+                continue
+            pid = getattr(c, "passage_id", "")
+            p = index.resolve(pid)
+            if p is None:
+                # Unknown id → counted as an unknown-URL citation by the
+                # verifier, exactly like a hallucinated source.
+                citations.append(
+                    Citation(
+                        claim=c.claim, quote="",
+                        source_url=f"passage:{pid or '?'}",
+                    )
+                )
+                dead_markers.append(pid)
+                continue
+            cov = _claim_coverage(c.claim, p.text)
+            best = max(
+                index.by_id.values(), key=lambda q: _claim_coverage(c.claim, q.text)
+            )
+            best_cov = _claim_coverage(c.claim, best.text)
+            if (
+                best.pid != pid
+                and best_cov >= _CLAIM_COVERAGE_MIN
+                and best_cov - cov >= 0.2
+            ):
+                # Right claim, wrong passage: the model attached a topically
+                # related id rather than the one stating the fact. Re-point
+                # at the clearly better passage — the quote stays verbatim
+                # evidence text. If nothing clearly states the claim, it
+                # stays as cited and the claim adjudicator decides.
+                logger.info(
+                    "citation_remapped",
+                    old=pid, new=best.pid, claim=c.claim[:120],
+                )
+                remapped.append((pid, best.pid))
+                p = best
+            citations.append(
+                Citation(claim=c.claim, quote=p.text, source_url=p.url, ref=p.pid)
+            )
+        logger.info(
+            "writer_citations",
+            emitted=len(out.citations),
+            kept=len(citations),
+        )
+        markdown = out.markdown
+        # Marker edits are positional: claims are emitted in document order,
+        # so each dropped/remapped entry owns the LAST occurrence of its
+        # marker — earlier ones may belong to kept citations on the same id.
+        def _last_marker(text: str, pid: str) -> tuple[str, int]:
+            i = text.rfind(f" [{pid}]")
+            if i != -1:
+                return f" [{pid}]", i
+            i = text.rfind(f"[{pid}]")
+            return f"[{pid}]", i
+
+        # Dead markers go first — they operate on the model's original
+        # markers; a remapped marker may reuse a pid that also has a dead
+        # entry, and it must not exist yet when removals run.
+        for pid in dead_markers:
+            marker, i = _last_marker(markdown, pid)
+            if i != -1:
+                markdown = markdown[:i] + markdown[i + len(marker):]
+        for old, new in remapped:
+            marker, i = _last_marker(markdown, old)
+            if i != -1:
+                markdown = (
+                    markdown[:i] + marker.replace(old, new) + markdown[i + len(marker):]
                 )
         draft = ReportDraft(
             version=version,
             title=out.title,
-            markdown=out.markdown,
+            markdown=markdown,
             citations=citations,
         )
         action = "revised" if version > 1 else "drafted"

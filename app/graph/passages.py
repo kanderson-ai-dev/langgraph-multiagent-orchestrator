@@ -64,17 +64,22 @@ def _split_passages(text: str) -> list[str]:
 
 
 def _is_prose(passage: str) -> bool:
-    """Real prose contains a decently-long sentence ending in .!?
+    """Real prose is mostly sentence-punctuated text, not a heading/bullet
+    fragment with one sentence fused on.
 
-    Titles, nav rows and listicle chrome ("5 articles / Platform overview")
-    fail this; they must never become citable passages — a model that can
-    only pick real sentences can't attribute a claim to a page heading.
-    A passage that *merges* a heading into a sentence still passes: the
-    heading comes along, but there is prose to cite.
+    Titles, nav rows and listicle chrome must never become citable passages
+    — a model that can only pick real sentences can't attribute a claim to
+    a page heading. Requiring that ≥45% of the passage's characters sit
+    inside proper sentences (≥30 chars, ending in .!?) keeps merged
+    chrome-plus-sentence fragments out too.
     """
     if len(passage) < 120:
         return False
-    return bool(re.search(r"[A-Za-z][^.!?\n]{30,}[.!?]", passage))
+    covered = sum(
+        len(m.group(0))
+        for m in re.finditer(r"[A-Za-z][^.!?\n]{30,}[.!?]", passage)
+    )
+    return covered / len(passage) >= 0.45
 
 
 def _tokens(text: str) -> list[str]:

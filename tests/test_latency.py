@@ -135,10 +135,10 @@ def _revising_stub(score: float) -> StubLLM:
     return stub
 
 
-async def test_early_exit_high_score_skips_extra_round() -> None:
+async def test_high_score_approves_in_one_round() -> None:
     """High rubric + clean citations → approve in one round, whatever the
-    advisory verdict says (verdict is rubric-derived now)."""
-    settings = _settings(review_early_exit_score=4.5, max_debate_rounds=3)
+    advisory verdict says (verdict is rubric-derived)."""
+    settings = _settings(max_debate_rounds=3)
     graph = build_graph(
         settings, llm=_revising_stub(4.9),
         search=_FakeSearch(), scraper=_FakeScraper(),  # type: ignore[arg-type]
@@ -158,8 +158,8 @@ async def test_early_exit_high_score_skips_extra_round() -> None:
     assert out["debate_round"] == 1
 
 
-async def test_no_early_exit_below_threshold() -> None:
-    settings = _settings(review_early_exit_score=4.5, max_debate_rounds=1)
+async def test_low_score_revise_uses_rounds_then_escalates() -> None:
+    settings = _settings(max_debate_rounds=1)
     graph = build_graph(
         settings, llm=_revising_stub(3.0),
         search=_FakeSearch(), scraper=_FakeScraper(),  # type: ignore[arg-type]

@@ -13,6 +13,7 @@ from _pytest.config import Config
 from _pytest.nodes import Item
 
 from app.core.config import Settings
+from app.services.prompt_eval import _template_cover_markdown
 from app.services.prompt_registry import PromptRegistry
 
 # Marker -> env var that must be present (and non-empty) for the test to run.
@@ -48,8 +49,6 @@ def prompts() -> PromptRegistry:
 # entry as `##` headings — the mechanical structure check in the Reviewer
 # matches required headings as an ordered subsequence, so this draft shape
 # satisfies every report_type at once.
-from app.services.prompt_eval import _template_cover_markdown
-
 ALL_SECTIONS_MARKDOWN = _template_cover_markdown()
 
 

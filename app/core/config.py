@@ -82,7 +82,6 @@ class Settings(BaseSettings):
     research_scrape_top_k: int = Field(default=12, ge=1, le=50)
     # When the reviewer scores >= this *and* every citation verified, exit
     # the debate early instead of spending another writer round; None off.
-    review_early_exit_score: float | None = Field(default=4.5, ge=1.0, le=5.0)
     # Skip the reviewer LLM call entirely when deterministic citation
     # verification already fails below the support threshold.
     reviewer_citation_shortcircuit: bool = True
