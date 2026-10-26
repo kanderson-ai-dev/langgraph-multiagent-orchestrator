@@ -32,8 +32,9 @@ from app.services.tracing import init_tracing
 from evaluation.dataset import DATASET, EvalCase
 from evaluation.run_eval import _run_case
 
-# Versioned dataset name — bump when the item schema changes.
-DATASET_NAME = "langgraph-orchestrator-eval-v1"
+# Versioned dataset name — bump when the item schema changes (v2 added
+# report_type/language/tenant_context to every item's input).
+DATASET_NAME = "langgraph-orchestrator-eval-v2"
 
 # Per-case score keys pushed as Langfuse scores (NUMERIC).
 _SCORE_KEYS = [

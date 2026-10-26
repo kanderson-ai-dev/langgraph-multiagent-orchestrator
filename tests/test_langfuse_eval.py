@@ -39,7 +39,7 @@ def test_dataset_item_ids_are_stable() -> None:
 
     ids = {f"{lfe.DATASET_NAME}:{c.case_id}" for c in DATASET}
     assert len(ids) == len(DATASET)
-    assert all(i.startswith("langgraph-orchestrator-eval-v1:") for i in ids)
+    assert all(i.startswith("langgraph-orchestrator-eval-v2:") for i in ids)
 
 
 def test_inputs_roundtrip_preserves_every_field() -> None:
