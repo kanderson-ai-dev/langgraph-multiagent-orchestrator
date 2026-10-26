@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # LLM
     openai_api_key: SecretStr | None = None
     chat_model_name: str = "gpt-4o-mini"
+    # Writer citation contract: free_quote = the model types the quote;
+    # extractive = it cites a passage id and code resolves verbatim text.
+    citation_mode: str = "free_quote"  # "free_quote" | "extractive"
+    # Determinism knobs — real calls only; stub ignores them.
+    llm_temperature: float = 0.0
+    llm_seed: int | None = None
     # Optional cheaper/faster model for the Reviewer role; None = same as
     # chat_model_name. Latency candidate (Phase 8).
     reviewer_model: str | None = None

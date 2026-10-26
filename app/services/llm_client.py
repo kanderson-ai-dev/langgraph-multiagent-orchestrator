@@ -46,12 +46,19 @@ class OpenAIStructuredLLM:
         # Exposed so cost tracking can price the call against the real model
         # name instead of falling back to the default price pair.
         self.model_name = model or settings.chat_model_name
+        seed_kwargs: dict[str, Any] = (
+            {"seed": settings.llm_seed} if settings.llm_seed is not None else {}
+        )
         self._model = ChatOpenAI(
             model=self.model_name,
             api_key=settings.openai_api_key,
+            # Deterministic drafting/verifying: verbatim citation copying is
+            # hurt by sampling noise; 0.0 is the intended default here.
+            temperature=settings.llm_temperature,
             # Transient 429/5xx retry with exponential backoff — parallel jobs
             # can briefly saturate the org TPM limit mid-run.
             max_retries=self.max_retries,
+            **seed_kwargs,  # type: ignore[arg-type]
         )
         # Bounded outputs: schemas already cap completion size; the setting
         # is an extra seatbelt when configured (None = provider default).
