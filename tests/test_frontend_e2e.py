@@ -300,9 +300,11 @@ def test_performance_and_audit_tabs(live_server: Any) -> None:
             assert "valid" in page.inner_text("#audit-verify-badge")
 
             # Tamper the stored transcript → re-verify flips to INVALID.
-            # (sync sqlite3 — playwright's sync API owns the event loop)
+            # (sync sqlite3 — playwright's sync API owns the event loop;
+            # the connect() CM only manages the transaction — close it too)
             import sqlite3
-            with sqlite3.connect(live_server.db) as db:
+            db = sqlite3.connect(live_server.db)
+            try:
                 db.execute(
                     "UPDATE jobs SET result_json ="
                     " json_replace(result_json,"
@@ -311,6 +313,8 @@ def test_performance_and_audit_tabs(live_server: Any) -> None:
                     (job_id,),
                 )
                 db.commit()
+            finally:
+                db.close()
             page.click("#audit-verify")
             page.wait_for_selector("#audit-verify-badge.chip-bad",
                                    timeout=15000)

@@ -4,7 +4,7 @@
  * server-side; the UI surfaces the real API errors. */
 
 import { API, api, apiPost, ApiError, authHeaders } from "../api.js";
-import { $, escapeHtml, toast } from "../util.js";
+import { $, escapeHtml, prettyName, toast } from "../util.js";
 
 let registry = {}; // name → versions[]
 let current = { name: null, version: null };
@@ -36,7 +36,7 @@ export async function loadRegistry() {
       el.className = "prompt-name" + (name === current.name ? " active" : "");
       el.dataset.name = name;
       el.innerHTML =
-        `<span>${escapeHtml(name)}</span>` +
+        `<span>${escapeHtml(prettyName(name))}</span>` +
         `<span class="prompt-name-meta">${versions.length}v` +
         (promoted ? ` · v${promoted.version}` : "") + `</span>`;
       box.appendChild(el);
