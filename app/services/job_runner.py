@@ -512,6 +512,14 @@ class JobRunner:
                 await task
 
     async def aclose(self) -> None:
-        """Release owned resources (pooled scraper connections)."""
+        """Release owned resources: cancel in-flight job tasks (their
+        context managers then close SQLite/HTTP connections before the
+        loop goes away) plus the pooled scraper."""
+        tasks = [t for t in self._tasks.values() if not t.done()]
+        for t in tasks:
+            t.cancel()
+        for t in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await t
         if self._scraper is not None:
             await self._scraper.aclose()

@@ -22,7 +22,7 @@ import os
 import sqlite3
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -75,17 +75,26 @@ async def open_connection(path: str) -> aiosqlite.Connection:
     The caller owns the returned connection and must close it.
     """
     _ensure_parent(path)
-    db = await aiosqlite.connect(path)
-    for attempt in range(6):
-        try:
-            await _apply_pragmas(db)
-            return db
-        except sqlite3.OperationalError as exc:
-            if "locked" not in str(exc) or attempt == 5:
-                await db.close()
-                raise
-            await asyncio.sleep(0.05 * (attempt + 1))
-    return db  # unreachable; keeps the return type obvious
+    # ``connect()`` spawns the worker thread synchronously; split the
+    # await so a cancellation lands inside the try where close() runs.
+    db = aiosqlite.connect(path)
+    try:
+        await db
+        for attempt in range(6):
+            try:
+                await _apply_pragmas(db)
+                return db
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc) or attempt == 5:
+                    raise
+                await asyncio.sleep(0.05 * (attempt + 1))
+        return db  # unreachable; keeps the return type obvious
+    except BaseException:
+        # Cancellation (e.g. runner shutdown mid-open) must not strand a
+        # live worker thread — close before propagating.
+        with suppress(Exception):
+            await db.close()
+        raise
 
 
 def _apply_pragmas_sync(conn: sqlite3.Connection) -> None:

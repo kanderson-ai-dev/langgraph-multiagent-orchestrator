@@ -79,6 +79,13 @@ known-first-party = ["app", "tests", "evaluation"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+filterwarnings = [
+    # Unclosed aiosqlite connections / dead-loop worker posts mean a
+    # job task was orphaned at shutdown — an error, not a warning.
+    "error::ResourceWarning:aiosqlite",
+    "error::pytest.PytestUnhandledThreadExceptionWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
+]
 markers = [
     "requires_openai_key: needs a real OPENAI_API_KEY",
     "requires_search_api: needs a real SEARCH_API_KEY",
