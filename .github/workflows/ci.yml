@@ -139,6 +139,20 @@ jobs:
       - name: Build image
         run: docker build -t orchestrator:ci .
 
+      - name: Image vulnerability scan (Trivy)
+        # aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
+        with:
+          image-ref: orchestrator:ci
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          # Fail on FIXABLE findings only — an unfixable base-image CVE
+          # cannot be resolved by pinning and would gate forever; any
+          # accepted finding needs a written reason in .trivyignore.
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+
       - name: Container smoke test
         run: |
           # Host port 18000: even a leaked `app` can never collide with the

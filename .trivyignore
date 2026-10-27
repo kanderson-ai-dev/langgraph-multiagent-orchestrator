@@ -1,0 +1,9 @@
+# Accepted Trivy findings — each line needs a written reason.
+# Only UNFIXED vulnerabilities are ignored by the CI step itself
+# (ignore-unfixed); entries here must be fixable findings we consciously
+# accept, with the reason and the date it was accepted.
+#
+# Format: CVE-ID  # reason (accepted YYYY-MM-DD)
+#
+# Example:
+# CVE-2024-12345  # base-image CVE in zlib, fix pending upstream; low runtime exposure (accepted 2026-10-27)
