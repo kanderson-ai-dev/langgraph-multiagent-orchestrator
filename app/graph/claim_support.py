@@ -15,6 +15,7 @@ per-citation in the live run file so they can be hand-checked for
 calibration.
 """
 
+import contextlib
 import re
 from typing import Any, Literal
 
@@ -30,24 +31,57 @@ class ClaimVerdicts(BaseModel):
 
 
 _SYSTEM = (
-    "You are a fact-checking judge. For each numbered item you are given a "
-    "claim from a report and the exact quote that was cited to support it. "
-    "First classify the claim: FACTUAL claims assert something a source "
-    "could literally state (names, numbers, events, capabilities); "
-    "ANALYTIC claims are the report author's own synthesis — "
-    "recommendations, judgments, outlook, implications. Then decide "
-    "whether the quote genuinely supports the claim: for FACTUAL claims, "
-    "'yes' = the quote directly states or clearly implies the claim; for "
-    "ANALYTIC claims, 'yes' = the quote provides the factual basis for "
-    "that judgment (a cost recommendation citing cost evidence counts; a "
-    "recommendation citing merely topical text does not). In both cases "
-    "'partly' = thin, partial, or heavily-interpreted support and "
-    "'no' = unrelated or contradicting. Answer with one verdict per item, "
-    "in order, nothing else."
+    "You are a strict fact-checking judge. For each numbered item you are "
+    "given a claim from a report and the exact quote that was cited to "
+    "support it. Decide whether the quote supports the claim:\n"
+    "'yes' = the quote directly states the claim's core assertion, or the "
+    "claim is a near-verbatim restatement or light paraphrase of the "
+    "quote. Numbers, names and dates in the claim must appear in — or be "
+    "trivially entailed by — the quote. A mild evaluative tail ('is "
+    "crucial', 'suggests potential', 'which may not reflect the full "
+    "picture') does not downgrade an otherwise stated core — but a tail "
+    "asserting a NEW unsupported fact does.\n"
+    "'partly' = the quote is on-topic and supports part of the claim, but "
+    "a material part of the claim's assertion is absent, or the claim "
+    "adds inference or specificity the quote does not state. A compound "
+    "claim where only one part is supported is 'partly'.\n"
+    "'no' = the quote is unrelated, site boilerplate/navigation, "
+    "contradicts the claim, or the claim's operative figures, entities "
+    "or dates are absent from it. Topical relevance alone is NOT "
+    "support.\n"
+    "Recommendations and judgments are the report author's own voice: "
+    "'yes' only when the quote states the factual premise the claim "
+    "rests on; 'partly' when it merely shares the topic.\n"
+    "Answer with one verdict per item, in order, nothing else."
 )
 
 
 _WS_RE = re.compile(r"[^a-z0-9]+")
+# Digit runs, optionally with thousands separators or decimals. Single
+# digits are ignored — they are enumerators/version tails ("SOC 2") more
+# often than statistics, and flagging them would cry wolf.
+_FIG_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
+def _figure_tokens(text: str) -> set[str]:
+    out: set[str] = set()
+    for tok in _FIG_RE.findall(text):
+        t = tok.rstrip(".").replace(",", "")
+        if len(t) < 2:
+            continue
+        out.add(t)
+        with contextlib.suppress(ValueError):
+            out.add(f"{float(t):g}")  # "14.10" -> "14.1", "7500.0" -> "7500"
+    return out
+
+
+def missing_claim_figures(claim: str, quote: str) -> list[str]:
+    """Numbers the claim asserts that appear nowhere in its quote.
+
+    A figure absent from the cited passage cannot be supported by it —
+    "the quote is on-topic" does not make a fabricated statistic true.
+    """
+    return sorted(_figure_tokens(claim) - _figure_tokens(quote))
 
 
 def _verbatim_supported(claim: str, quote: str) -> bool:
@@ -81,10 +115,22 @@ async def judge_claim_support(
     """
     if not citations:
         return [], 0.0
-    auto_yes = [_verbatim_supported(c.claim, c.quote) for c in citations]
-    to_judge = [(i, c) for i, c in enumerate(citations) if not auto_yes[i]]
+    # Deterministic passes first — no judge ballot needed when the
+    # outcome is decidable in code: a verbatim claim is 'yes' by
+    # definition, and a claim citing figures absent from its own quote
+    # can never be fully supported, so it is 'partly' by construction.
+    auto: list[str | None] = []
+    for c in citations:
+        if _verbatim_supported(c.claim, c.quote):
+            auto.append("yes")
+        elif missing_claim_figures(c.claim, c.quote):
+            auto.append("partly")
+        else:
+            auto.append(None)
+    to_judge = [(i, c) for i, c in enumerate(citations) if auto[i] is None]
     if not to_judge:
-        return ["yes"] * len(citations), 1.0
+        verdicts = [a if a is not None else "yes" for a in auto]
+        return verdicts, claim_support_rate(verdicts)
 
     from app.core.cost_tracking import tracked_structured
 
@@ -92,26 +138,43 @@ async def judge_claim_support(
         f"[{k}] claim: {c.claim}\nquote: {c.quote}\nsource: {c.source_url}"
         for k, (_, c) in enumerate(to_judge)
     )
-    out = await tracked_structured(
-        judge_llm,
-        ClaimVerdicts,
-        role="claim_judge",
-        system=_SYSTEM,
-        user=(
-            f"{len(to_judge)} items follow — return exactly "
-            f"{len(to_judge)} verdicts, in order.\n\n{items}"
-        ),
-        context={"prompt_name": "claim_support"},
-    )
-    judged = [str(v) for v in getattr(out, "verdicts", [])]
-    if not judged:
+    # Three samples per batch, majority vote — hand-labelling showed a
+    # single judge sample drifts ~20 % on boundary items (verbatim-with-
+    # tail downgraded to ``partly``, occasional clear misses); majority
+    # voting removes the variance without loosening the standard.
+    ballots: list[list[str]] = []
+    for _ in range(3):
+        out = await tracked_structured(
+            judge_llm,
+            ClaimVerdicts,
+            role="claim_judge",
+            system=_SYSTEM,
+            user=(
+                f"{len(to_judge)} items follow — return exactly "
+                f"{len(to_judge)} verdicts, in order.\n\n{items}"
+            ),
+            context={"prompt_name": "claim_support"},
+        )
+        ballots.append([str(v) for v in getattr(out, "verdicts", [])])
+    if not any(ballots):
         # Stub/no-output path — adjudication is a documented no-op.
         return [], 0.0
-    if len(judged) < len(to_judge):
-        # A real judge that short-lists leaves some claims unadjudicated;
-        # an unadjudicated claim is not a supported one — pad as "no".
-        judged += ["no"] * (len(to_judge) - len(judged))
-    verdicts = ["yes" if y else "no" for y in auto_yes]
-    for (i, _), v in zip(to_judge, judged[: len(to_judge)], strict=False):
+    judged = _majority(ballots, len(to_judge))
+    verdicts = [a if a is not None else "no" for a in auto]
+    for (i, _), v in zip(to_judge, judged, strict=False):
         verdicts[i] = v
     return verdicts, claim_support_rate(verdicts)
+
+
+def _majority(ballots: list[list[str]], n: int) -> list[str]:
+    """Per-item majority vote across judge samples; unadjudicated or
+    tied items resolve to ``no`` (an unadjudicated claim is not a
+    supported one)."""
+    from collections import Counter
+
+    out: list[str] = []
+    for k in range(n):
+        votes = Counter(b[k] for b in ballots if k < len(b))
+        top = votes.most_common()
+        out.append(top[0][0] if top and (len(top) == 1 or top[0][1] > top[1][1]) else "no")
+    return out

@@ -22,7 +22,8 @@ from app.core.metrics import DEBATE_ROUNDS_TOTAL
 from app.core.thresholds import EDD_THRESHOLDS
 from app.framework.worker import StateUpdate
 from app.graph.citations import citation_supported, support_rate
-from app.graph.claim_support import judge_claim_support
+from app.graph.claim_support import judge_claim_support, missing_claim_figures
+from app.graph.nodes.writer import _claim_coverage
 from app.graph.state import (
     AgentMessage,
     Brief,
@@ -431,11 +432,39 @@ class ReviewerWorker:
             blocking = "; ".join(
                 f"[{c.ref or c.source_url}] {c.claim[:80]}" for c in no_claims
             )
-            partly = "; ".join(
-                f"[{c.ref or c.source_url}] {c.claim[:80]}"
-                for c, v in zip(kept, claim_verdicts, strict=False)
-                if v == "partly"
-            )
+            # Per-claim directive, not a menu: if the quote does not
+            # state the claim's core (low coverage — and automatic
+            # re-citation already searched every passage), the only
+            # honest repair is deletion; if the core is stated but the
+            # claim adds an unsupported tail, trim the fragment.
+            partly_items = []
+            for c, v in zip(kept, claim_verdicts, strict=False):
+                if v != "partly":
+                    continue
+                missing_figs = missing_claim_figures(c.claim, c.quote)
+                if missing_figs:
+                    directive = (
+                        "DELETE the claim — entry, [marker], and "
+                        "sentence — or restate it without the numbers "
+                        f"its quote lacks: {', '.join(missing_figs)}"
+                    )
+                elif _claim_coverage(c.claim, c.quote) >= 0.5:
+                    directive = (
+                        "TRIM the unsupported fragment from claim and "
+                        "sentence (drop the number/name/qualifier the "
+                        "quote lacks)"
+                    )
+                else:
+                    directive = (
+                        "DELETE the claim — entry, [marker], and its "
+                        "sentence (recast as uncited analysis or drop "
+                        "it); no passage states its core, so rephrasing "
+                        "cannot fix it"
+                    )
+                partly_items.append(
+                    f"[{c.ref or c.source_url}] {c.claim[:80]} → {directive}"
+                )
+            partly = "; ".join(partly_items)
             feedback.append(
                 f"Cited claims not fully supported by their quoted passage "
                 f"(claim-support {claim_rate:.2f}). "
@@ -446,8 +475,7 @@ class ReviewerWorker:
                     else ""
                 )
                 + (
-                    f"Thin support — restate the claim as the quote's "
-                    f"literal content or remove it: {partly}."
+                    f"Thin support — repair each as directed: {partly}."
                     if partly
                     else ""
                 )

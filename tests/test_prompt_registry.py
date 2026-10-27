@@ -304,7 +304,7 @@ def test_overrides_view_pins_versions(tmp_path: Path) -> None:
     assert view.render("writer").text == "candidate text\n"
     assert view.get("writer").version == cand.version
     # Base registry unaffected.
-    assert reg.get("writer").version == 21
+    assert reg.get("writer").version == 23
     # Override view is read-only.
     with pytest.raises(PromptRegistryError, match="read-only"):
         view.create_candidate("writer", "x\n", "c")
@@ -350,7 +350,7 @@ def test_prompt_store_protocol_any_backend(tmp_path: Path) -> None:
 
     store = SqlitePromptStore(str(tmp_path / "reg.sqlite"))
     reg = PromptRegistry.load(store=store)
-    assert reg.get("writer").version == 21
+    assert reg.get("writer").version == 23
     cand = reg.create_candidate("writer", "store body\n", "via store")
     assert cand.status == PromptStatus.CANDIDATE
     reg.promote("writer", cand.version, actor="t")

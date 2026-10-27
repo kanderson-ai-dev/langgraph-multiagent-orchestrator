@@ -1,6 +1,6 @@
 name: writer
 version: 21
-status: promoted
+status: retired
 author: kaarsten
 created_at: '2026-10-26T20:12:13.988295Z'
 target_model: gpt-4o-mini

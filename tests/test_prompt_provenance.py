@@ -128,7 +128,7 @@ async def test_finished_job_records_all_worker_prompt_versions(
     )
     out = await g.ainvoke(state)
     versions = out["prompt_versions"]
-    assert (versions["researcher"], versions["writer"], versions["reviewer"]) == (1, 21, 4)
+    assert (versions["researcher"], versions["writer"], versions["reviewer"]) == (1, 23, 4)
     # Worker completion events carry their prompt version into the transcript.
     result_msgs = [
         m for m in out["transcript"]
@@ -248,7 +248,7 @@ async def test_job_result_contains_prompt_versions(
     record = await runner.job_store.get("ws", job.job_id)
     assert record is not None and record.result is not None
     versions = record.result["prompt_versions"]
-    assert versions["writer"] == 21 and versions["reviewer"] == 4
+    assert versions["writer"] == 23 and versions["reviewer"] == 4
 
 
 def test_pdf_footer_renders_without_error() -> None:
@@ -338,7 +338,7 @@ def test_registry_publish_metrics_sets_gauges(prompts: PromptRegistry) -> None:
     assert (
         REGISTRY.get_sample_value(
             "orchestrator_prompt_version_info",
-            {"name": "writer", "version": "21"},
+            {"name": "writer", "version": "23"},
         )
         == 1
     )

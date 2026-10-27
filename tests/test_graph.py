@@ -8,7 +8,12 @@ from app.core.config import Settings
 from app.graph.graph import build_graph, initial_state
 from app.graph.nodes.researcher import ResearchPlan
 from app.graph.nodes.reviewer import ReviewOutput
-from app.graph.nodes.writer import DraftCitation, DraftOutput
+from app.graph.nodes.writer import (
+    DraftCitation,
+    DraftOutput,
+    DraftOutputPassages,
+    PassageCitation,
+)
 from app.graph.state import Brief
 from app.services.llm_client import StubLLM
 from app.services.scraper_client import ScrapedPage
@@ -16,8 +21,11 @@ from app.services.search_client import SearchResult
 from tests.conftest import ALL_SECTIONS_MARKDOWN
 
 _HTML = (
-    b"<html><title>Src</title><body>RAG systems retrieve documents "
-    b"to ground generation in sources.</body></html>"
+    b"<html><title>Src</title><body>"
+    b"<p>RAG systems retrieve documents to ground generation in sources. "
+    b"Retrieval augmented generation keeps answers anchored to fetched "
+    b"evidence rather than model memory.</p>"
+    b"</body></html>"
 )
 
 
@@ -62,7 +70,28 @@ def _stub_llm(*, verdict: str = "approve") -> StubLLM:
             ],
         ),
     )
-    score = 4.2 if verdict == "approve" else 3.0
+    # Extractive mode (the shipped default): the single fake source is
+    # passage S0-P0 — the marker in the markdown and the entry's
+    # passage_id resolve to the same id.
+    stub.register(
+        "DraftOutputPassages",
+        lambda s, c: DraftOutputPassages(
+            title="Stub Report",
+            markdown=ALL_SECTIONS_MARKDOWN
+            + "\n\nRAG grounds generation in retrieved sources [S0-P0].\n",
+            citations=[
+                PassageCitation(
+                    claim="RAG systems retrieve documents to ground "
+                    "generation in sources",
+                    passage_id="S0-P0",
+                )
+            ],
+        ),
+    )
+    # "revise" must be a real defect under the rule-derived verdict: the
+    # mechanical overrides lift structure/grounding to 5.0, so a 3.0 stub
+    # would mean 4.0 / min 3.0 — an approve. 2.5 dims stay blocking.
+    score = 4.2 if verdict == "approve" else 2.5
     stub.register(
         "ReviewOutput",
         lambda s, c: ReviewOutput(

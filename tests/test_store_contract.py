@@ -453,7 +453,7 @@ def test_prompt_registry_on_store_backend(prompt_store: Any, ws: Any) -> None:
     )
 
     reg = PromptRegistry.load(store=prompt_store)
-    assert reg.get("writer").version == 21
+    assert reg.get("writer").version == 23
     cand = reg.create_candidate("writer", "pg body\n", "on store")
     assert cand.status == PromptStatus.CANDIDATE
     reg.promote("writer", cand.version, actor="t")

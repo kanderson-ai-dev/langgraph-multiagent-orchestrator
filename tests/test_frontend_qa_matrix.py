@@ -317,7 +317,8 @@ def _serve(case: Case, tmp_path: Path) -> Iterator[Any]:
     from app.services.prompt_registry import PromptRegistry
 
     settings = Settings(
-        _env_file=None, scrape_delay_seconds=0.0, scrape_respect_robots=False
+        _env_file=None, scrape_delay_seconds=0.0, scrape_respect_robots=False,
+        citation_mode="free_quote",
     )
     # The graph and the API share one registry so a UI-driven promote
     # propagates into the next job's rendered prompts.

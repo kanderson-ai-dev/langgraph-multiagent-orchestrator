@@ -126,6 +126,21 @@ def _register_stub_builders(llm: StubLLM) -> None:
             ],
         ),
     )
+    from app.graph.nodes.writer import DraftOutputPassages, PassageCitation
+
+    llm.register_default(
+        "DraftOutputPassages",
+        lambda s, c: DraftOutputPassages(
+            title="Stub Report",
+            citations=[
+                PassageCitation(claim="stub claim", passage_id="S0-P0"),
+            ],
+            markdown=(
+                "## Summary\nOffline stub draft (no LLM credentials "
+                "configured) [S0-P0]."
+            ),
+        ),
+    )
     llm.register_default(
         "ReviewOutput",
         lambda s, c: ReviewOutput(

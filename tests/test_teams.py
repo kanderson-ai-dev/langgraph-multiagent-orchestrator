@@ -42,7 +42,8 @@ class _FakeScraper:
 
 def _settings(**kw: Any) -> Settings:
     return Settings(_env_file=None, scrape_delay_seconds=0.0,
-                    scrape_respect_robots=False, **kw)
+                    scrape_respect_robots=False,
+                    citation_mode="free_quote", **kw)
 
 
 def _stub_llm() -> StubLLM:

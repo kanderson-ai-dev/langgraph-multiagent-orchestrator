@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     chat_model_name: str = "gpt-4.1-mini"
     # Writer citation contract: free_quote = the model types the quote;
     # extractive = it cites a passage id and code resolves verbatim text.
-    citation_mode: str = "free_quote"  # "free_quote" | "extractive"
+    citation_mode: str = "extractive"  # "extractive" | "free_quote"
     # Determinism knobs — real calls only; stub ignores them.
     llm_temperature: float = 0.0
     llm_seed: int | None = None

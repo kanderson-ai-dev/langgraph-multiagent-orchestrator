@@ -161,7 +161,9 @@ async def test_high_score_approves_in_one_round() -> None:
 async def test_low_score_revise_uses_rounds_then_escalates() -> None:
     settings = _settings(max_debate_rounds=1)
     graph = build_graph(
-        settings, llm=_revising_stub(3.0),
+        # 3.0 no longer blocks: the mechanical overrides lift two dims to
+        # 5.0 → mean 4.0 / min 3.0 approves. 2.5 stays under the dim floor.
+        settings, llm=_revising_stub(2.5),
         search=_FakeSearch(), scraper=_FakeScraper(),  # type: ignore[arg-type]
         checkpointer=MemorySaver(),
     )

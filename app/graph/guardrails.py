@@ -19,7 +19,16 @@ from pydantic import BaseModel
 
 # Injection / jailbreak signals on user input (compiled once).
 _INJECTION_PATTERNS = [
-    re.compile(r"ignore\s+(all\s+)?(previous|prior|above|earlier)\s+instructions", re.I),
+    re.compile(
+        r"(ignore|disregard|forget|skip|drop|dismiss)\s+"
+        r"(all\s+)?(previous|prior|above|earlier|preceding)\s+instructions",
+        re.I,
+    ),
+    re.compile(
+        r"(olvid\w+|omit\w+|descart\w+)\s+(todas\s+)?(las\s+)?instrucciones\s+"
+        r"(anteriores|previas)",
+        re.I,
+    ),
     # "Ignore previous instructions" — ES / FR / DE / PT. The phrases are
     # specific enough that legitimate briefs (which may mention
     # "instrucciones" or "prompt") do not collide.
@@ -27,8 +36,16 @@ _INJECTION_PATTERNS = [
     re.compile(r"ignorer?\s+(toutes?\s+)?les?\s+instructions\s+pr[ée]c[ée]dentes", re.I),
     re.compile(r"ignoriere?\s+(alle\s+)?(vorherigen|bisherigen)\s+anweisungen", re.I),
     re.compile(r"ignore\s+(todas\s+)?as\s+instru[çc][õo]es\s+anteriores", re.I),
-    re.compile(r"(revela|revelar)\s+(el|o|tu|seu)\s+(prompt|sistema)", re.I),
-    re.compile(r"(reveal|show|print|repeat)\s+(your|the)\s+(system\s+)?prompt", re.I),
+    re.compile(
+        r"(revela|revelar|muestra|mostrar|muestrame|mostre|exibe|muestre)\s+"
+        r"(me\s+)?(el|o|tu|seu|teu)\s+(prompt|sistema)",
+        re.I,
+    ),
+    re.compile(
+        r"(reveal|show|print|repeat|output|display|give|return|paste|share)\s+"
+        r"(me\s+)?(your|the|my|our)\s+(system\s+)?(prompt|instructions?)",
+        re.I,
+    ),
     # "Reveal/show your system prompt" — FR / DE.
     re.compile(
         r"r[ée]v[èe]l(e|er|ez)\s+(le|ton|votre)\s+(prompt|syst[èe]me)", re.I
@@ -102,15 +119,23 @@ def _normalize(text: str) -> str:
     )
 
 
+_B64_TOKEN = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
+
+
 def _decode_variants(text: str) -> list[str]:
     """Bounded transport-decoded forms of ``text``, for screening only.
 
     Attackers hide the whitespace the ``\\s`` patterns need inside encodings
-    (``ignore%20previous%20instructions``). Matching runs on the raw text
-    plus a small set of decoded variants — the text later sent to the model
-    is never rewritten. Work is capped: at most two decode rounds, each
-    round bounded by the input length (already limited to 10k chars).
+    (``ignore%20previous%20instructions``) or inside raw base64 blobs
+    (``Please decode aWdub3Jl...`` — the word "base64" itself need not
+    appear). Matching runs on the raw text plus decoded variants; the text
+    later sent to the model is never rewritten. Work is capped: at most
+    two decode rounds, each round bounded by the input length (already
+    limited to 10k chars); base64 candidates are limited to 3 tokens of
+    ≤ 4 kB each so a brief quoting legit payloads stays cheap.
     """
+    import base64
+
     seen = {text, text.replace("+", " ")}
     frontier = list(seen)
     for _ in range(2):  # a double-encoded payload needs the second round
@@ -127,6 +152,17 @@ def _decode_variants(text: str) -> list[str]:
         if not nxt_round:
             break
         frontier = nxt_round
+    for token in _B64_TOKEN.findall(text)[:3]:
+        if len(token) > 4096:
+            continue
+        try:
+            decoded = base64.b64decode(token, validate=True).decode(
+                "utf-8", errors="ignore"
+            )
+        except ValueError:
+            continue
+        if decoded and decoded not in seen:
+            seen.add(decoded)
     return list(seen)
 
 
