@@ -45,6 +45,7 @@ def _app(
     *,
     signing_key: str | None = KEY,
     previous_keys: str | None = None,
+    tsa_url: str = "",
 ) -> Any:
     settings = Settings(
         _env_file=None,
@@ -55,6 +56,7 @@ def _app(
             SecretStr(previous_keys) if previous_keys else None
         ),
         audit_anchor_path=str(tmp_path / "anchor.jsonl"),
+        audit_anchor_tsa_url=tsa_url,
     )
     app = create_app()
     app.dependency_overrides[get_settings] = lambda: settings

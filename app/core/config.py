@@ -141,6 +141,12 @@ class Settings(BaseSettings):
     # job_id → audit_root, independent of the jobs DB (copy off-box to
     # make rewrites detectable).
     audit_anchor_path: str = "data/audit_anchor.jsonl"
+    # Optional RFC 3161 anchoring: on seal, request a timestamp token for
+    # the audit root from this TSA and store it in a sidecar log
+    # (<anchor>.tsa.jsonl). Empty = disabled. Requires the 'anchoring'
+    # extra (rfc3161-client); failures are retried bounded and logged,
+    # never failing a job.
+    audit_anchor_tsa_url: str = ""
 
     # Optional second-layer input screening: a strict yes/no model call for
     # briefs that pass the regex layer. Probabilistic, costs one call per

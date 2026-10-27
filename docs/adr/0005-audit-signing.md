@@ -89,3 +89,36 @@ The two "no rotation / no anchoring" limitations above are now closed:
 Still open: real third-party timestamping (RFC 3161 TSA / OpenTimestamps)
 over the anchor root — the anchor file is the stable artifact a TSA would
 stamp. Recorded as the next step in SECURITY.md.
+
+## Amendment — RFC 3161 timestamp anchoring (delivered)
+
+**Status:** accepted · **Date:** 2026-10
+
+The "external timestamping" limitation above is now closed as an
+optional deployment feature:
+
+- **Setting.** `AUDIT_ANCHOR_TSA_URL` (empty = disabled). When set, each
+  sealed job's `audit_root` is stamped by the configured TSA via the
+  standard Time-Stamp Protocol.
+- **What is stamped.** The message is `bytes.fromhex(audit_root)` — the
+  raw 32-byte digest — so offline verification recomputes
+  `sha256(root_bytes)` and compares it to the token's `messageImprint`.
+- **Where receipts live.** A sidecar log `<anchor>.tsa.jsonl` next to
+  the anchor file; the primary JSONL stays append-only and unchanged.
+- **Failure semantics.** Stamping runs as a bounded background task
+  (3 attempts, exponential backoff); a TSA outage is logged and never
+  fails or delays a sealed job.
+- **Offline verification.** `scripts/audit_anchor.py --verify`
+  re-verifies every stored receipt: signature over the token, imprint
+  matches the root, genTime extracted. No network.
+- **Trust model.** Verification uses the TSA certificate embedded in
+  the token (requested with `certReq=true`) chained against the public
+  CA bundle (certifi); a self-signed TSA acts as its own root. The
+  receipt records the signer certificate's sha256 fingerprint so a
+  different TSA key is detectable. A timestamp proves the digest existed
+  at a time under a TSA key — not truthfulness of the report, and not
+  that the operator trusts that particular TSA; deployments pin trust by
+  choosing `AUDIT_ANCHOR_TSA_URL` deliberately.
+- **Optional dependency.** `rfc3161-client` ships under the
+  `anchoring` extra only — the core install and all offline tests work
+  without it.

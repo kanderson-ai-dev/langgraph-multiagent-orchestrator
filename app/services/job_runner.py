@@ -372,6 +372,30 @@ class JobRunner:
                 logger.warning(
                     "audit_anchor_write_failed", job_id=job_id, exc_info=True
                 )
+            # Optional RFC 3161 stamping — fire-and-forget bounded task:
+            # a TSA outage must never delay or fail a sealed job.
+            tsa_url = self._settings.audit_anchor_tsa_url
+            if tsa_url and isinstance(root, str) and root:
+                async def _stamp() -> None:
+                    from app.services.tsa_anchor import stamp_with_retries
+
+                    try:
+                        await stamp_with_retries(
+                            tsa_url,
+                            self._settings.audit_anchor_path,
+                            job_id=job_id,
+                            workspace_id=workspace_id,
+                            audit_root=root,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "audit_anchor_tsa_failed",
+                            job_id=job_id,
+                            exc_info=True,
+                        )
+
+                with contextlib.suppress(RuntimeError):
+                    asyncio.get_running_loop().create_task(_stamp())
         # Job-level latency (active segment — HITL pauses excluded).
         elapsed = time.monotonic() - started
         from app.core.latency import LATENCY
@@ -385,6 +409,10 @@ class JobRunner:
 
             audit_root = values.get("audit_root")
             signature = _sig(audit_root)
+            # Anchor before publishing `done` — observers that see the
+            # terminal status can rely on the anchor line already being
+            # on disk (no polling window).
+            _anchor(audit_root, signature)
             await self._jobs.set_result(
                 workspace_id,
                 job_id,
@@ -407,7 +435,6 @@ class JobRunner:
                 cost_usd=cost,
                 status="done",
             )
-            _anchor(audit_root, signature)
         elif status == "awaiting_review":
             # Persist why it escalated — the console/poll shows the real
             # cause plus the legal actions for this pause.
@@ -439,6 +466,9 @@ class JobRunner:
             # here — the audit endpoint can still verify.
             audit_root = values.get("audit_root") or root_of(transcript)
             signature = _sig(audit_root)
+            # Same ordering as the done branch: anchor first, then the
+            # terminal status becomes observable.
+            _anchor(audit_root, signature)
             await self._jobs.set_result(
                 workspace_id,
                 job_id,
@@ -460,7 +490,6 @@ class JobRunner:
                 cost_usd=cost,
                 status=status,  # type: ignore[arg-type]
             )
-            _anchor(audit_root, signature)
         # Awaiting review is a pause, not a terminal state — keep the SSE
         # stream open so subscribers see events after the resume, and keep
         # the process-local state (last values for the checkpoint fallback,

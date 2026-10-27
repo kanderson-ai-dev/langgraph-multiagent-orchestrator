@@ -8,7 +8,6 @@ is documented as the next step.
 """
 
 import json
-import time
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -20,18 +19,6 @@ from app.services.audit_anchor import (
     read_anchors,
 )
 from tests.test_audit_signing import _app, _audit, _done_job, _tamper
-
-
-def _wait_anchors(path: str, n: int = 1) -> list[dict[str, Any]]:
-    """Poll for the anchor line — the job flips to ``done`` just before
-    the append lands, so a single read can race the writer."""
-    anchors: list[dict[str, Any]] = []
-    for _ in range(100):
-        anchors = read_anchors(path)
-        if len(anchors) >= n:
-            return anchors
-        time.sleep(0.05)
-    return anchors
 
 
 def test_append_writes_one_jsonl_line(tmp_path: Any) -> None:
@@ -95,7 +82,9 @@ def test_sealed_job_writes_anchor_and_detects_tamper(tmp_path: Any) -> None:
     db = str(tmp_path / "audit.sqlite")
     with TestClient(_app(tmp_path)) as client:
         job_id = _done_job(client)
-    anchors = _wait_anchors(path)
+    # The anchor append runs before the job is published as ``done`` —
+    # a completed job implies its anchor line is already on disk.
+    anchors = read_anchors(path)
     assert len(anchors) == 1
     assert anchors[0]["job_id"] == job_id
     real_root = anchors[0]["audit_root"]
@@ -121,7 +110,6 @@ def test_check_db_reports_drift(tmp_path: Any) -> None:
     db = str(tmp_path / "audit.sqlite")
     with TestClient(_app(tmp_path)) as client:
         job_id = _done_job(client)
-    _wait_anchors(path)
     rows = check_db(path, db)
     assert len(rows) == 1 and rows[0]["match"] is True
 

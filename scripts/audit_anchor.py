@@ -9,6 +9,9 @@ independent of the jobs database. This helper is the owner-facing surface:
 - ``--job <id>`` prints that job's anchor entry.
 - ``--check`` compares every anchor against the jobs DB and exits ``1``
   when any stored root was rewritten.
+- ``--verify`` re-verifies every stored RFC 3161 receipt in the
+  ``<anchor>.tsa.jsonl`` sidecar — signature, messageImprint and genTime
+  — fully offline, and exits ``1`` when any token fails.
 
 Usage::
 
@@ -16,6 +19,7 @@ Usage::
     uv run python scripts/audit_anchor.py latest --job 42
     uv run python scripts/audit_anchor.py --check --db data/orchestrator.sqlite
     uv run python scripts/audit_anchor.py latest --anchor data/audit_anchor.jsonl
+    uv run python scripts/audit_anchor.py --verify
 """
 
 from __future__ import annotations
@@ -48,6 +52,11 @@ def main() -> int:
         help="compare every anchor with the jobs DB instead",
     )
     parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="re-verify stored RFC 3161 receipts offline and exit 1 on failure",
+    )
+    parser.add_argument(
         "--anchor",
         default=None,
         help="anchor log path (default: AUDIT_ANCHOR_PATH)",
@@ -77,6 +86,29 @@ def main() -> int:
             )
         )
         return 1 if drift else 0
+
+    if args.verify:
+        from app.services import tsa_anchor
+
+        rows = [
+            tsa_anchor.verify_receipt(e)
+            for e in tsa_anchor.read_tsa_receipts(anchor_path)
+        ]
+        bad = [r for r in rows if not r["valid"]]
+        print(
+            json.dumps(
+                {
+                    "receipts": len(rows),
+                    "valid": len(rows) - len(bad),
+                    "invalid": [
+                        {"job_id": r["job_id"], "detail": r["detail"]}
+                        for r in bad
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 1 if bad else 0
 
     entry = audit_anchor.latest(anchor_path, job_id=args.job_id)
     if entry is None:
