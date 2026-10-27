@@ -28,10 +28,27 @@ def redact_sensitive_fields(
     return event_dict
 
 
+def harden_console_streams() -> None:
+    """A log line must never crash the process.
+
+    On cp1252/cp850 consoles an emoji or CJK char in scraped content
+    raises ``UnicodeEncodeError`` inside ``print()`` — which then
+    propagates through whatever was being logged (a supervisor
+    ``decide()`` call swallows it into a FINISH route). Replace
+    unencodable glyphs rather than lose the line or the job. Safe to call
+    more than once; a no-op where streams lack ``reconfigure``.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="replace")
+
+
 def configure_logging(settings: Settings) -> None:
     """Configure stdlib + structlog pipelines from settings."""
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
 
+    harden_console_streams()
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=level)
 
     shared_processors: list[Any] = [

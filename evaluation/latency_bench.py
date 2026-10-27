@@ -29,6 +29,9 @@ from evaluation.trend import _percentile, append_history, build_history_row
 
 
 async def _main() -> int:
+    from app.core.logging import harden_console_streams
+
+    harden_console_streams()
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", type=int, default=len(DATASET))
     parser.add_argument("--reps", type=int, default=1,

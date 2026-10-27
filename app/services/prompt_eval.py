@@ -25,6 +25,7 @@ from app.core.cost_tracking import UsageTracker, bind_tracker
 # Gated metrics — imported from app.core.thresholds so the runtime
 # (Reviewer's citation check) and the eval gate share one source of truth.
 from app.core.thresholds import EDD_THRESHOLDS  # noqa: F401  (re-export)
+from app.graph.claim_support import judge_claim_support
 from app.graph.graph import build_graph, initial_state
 from app.graph.nodes.researcher import ResearchPlan
 from app.graph.nodes.reviewer import ReviewOutput, Rubric
@@ -412,6 +413,17 @@ async def run_eval_case(
         "judge_cost_usd": round(judge_tracker.total_cost, 8),
         "llm_calls": len(tracker.records),
     }
+    # Integrity metric (D3): does each surviving quote actually back its
+    # claim? Mirrors scripts/live_gate.py — post-hoc adjudication of the
+    # last draft's citations by the judge model; a documented no-op on
+    # the stub (empty verdicts), which the gate treats as "not scored".
+    drafts = out.get("drafts") or []
+    citations_final = drafts[-1].citations if drafts else []
+    claim_verdicts, cs_rate = await judge_claim_support(
+        list(citations_final), judge_llm=judge_llm
+    )
+    metrics["claim_support_rate"] = cs_rate
+    metrics["claim_verdicts"] = claim_verdicts
     return metrics, out
 
 
@@ -470,6 +482,19 @@ def aggregate_metrics(results: list[dict[str, Any]]) -> dict[str, float]:
             / len(normal)
             if normal
             else 0.0
+        ),
+        # Averaged over cases that produced verdicts — mirrors the live
+        # gate's aggregate so both scorecards carry the same schema.
+        "claim_support_rate_avg": (
+            (
+                lambda rates: sum(rates) / len(rates) if rates else 0.0
+            )(
+                [
+                    float(r["claim_support_rate"])
+                    for r in normal
+                    if r.get("claim_verdicts")
+                ]
+            )
         ),
     }
 

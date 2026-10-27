@@ -224,6 +224,9 @@ async def record_case(case: EvalCase, settings: Settings) -> str:
 
 
 async def _main() -> int:
+    from app.core.logging import harden_console_streams
+
+    harden_console_streams()
     settings = Settings()  # real .env — credentials required
     if settings.openai_api_key is None:
         print("OPENAI_API_KEY required to record cassettes", file=sys.stderr)

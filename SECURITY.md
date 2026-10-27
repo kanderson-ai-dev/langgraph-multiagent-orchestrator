@@ -72,8 +72,9 @@ real scraped HTML and LLM payloads. Before a cassette is committed:
 - **LLM01 Prompt Injection** — input guardrail on the brief (NFKC +
   invisible-char normalization before matching, EN/ES/FR/DE/PT patterns).
   Screening also matches bounded *decoded variants* — percent-encoding,
-  `+`-as-space, double-encoding and HTML entities — so
-  `ignore%20previous%20instructions` and friends cannot slip past the
+  `+`-as-space, double-encoding, HTML entities and base64 blobs — so
+  `ignore%20previous%20instructions` and a bare `aWdub3Jl…` token cannot
+  slip past the
   `\s` patterns; the text sent to the model is never rewritten by
   screening. Scraped/parsed content is transport-decoded before the
   defang list runs, closing the same evasion for indirect injection.

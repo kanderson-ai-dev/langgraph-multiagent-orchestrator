@@ -70,8 +70,24 @@ async def _run_case(
     return metrics
 
 
-def _check_gates(metrics: dict[str, float]) -> dict[str, bool]:
-    return {k: metrics[k] >= v for k, v in THRESHOLDS.items()}
+def _check_gates(
+    metrics: dict[str, float], thresholds: dict[str, float] | None = None
+) -> dict[str, bool]:
+    t = thresholds if thresholds is not None else THRESHOLDS
+    return {k: metrics[k] >= v for k, v in t.items()}
+
+
+def _gate_thresholds(results: list[dict[str, Any]]) -> dict[str, float]:
+    """The claim-support gate is meaningful only where a judge
+    adjudicated — live runs. Stub runs produce empty verdict sets, so
+    the metric is dropped from the gate set rather than scored 0
+    (mirrors scripts/live_gate.py)."""
+    thresholds = dict(THRESHOLDS)
+    if not any(
+        r.get("claim_verdicts") for r in results if not r["expected_blocked"]
+    ):
+        thresholds.pop("claim_support_rate_avg", None)
+    return thresholds
 
 
 def build_scorecard(
@@ -131,8 +147,8 @@ def _print_scorecard(
         "avg_latency_seconds": ("avg_latency_seconds", ".2f"),
         "avg_llm_calls": ("avg_llm_calls", ".1f"),
     }
-    for metric, threshold in THRESHOLDS.items():
-        mark = "PASS" if gates[metric] else "FAIL"
+    for metric, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
         # Metrics the baseline has no notion of (e.g. debate convergence)
         # render as n/a rather than a fake 0.000.
         base = (
@@ -140,8 +156,16 @@ def _print_scorecard(
         )
         print(
             f"  {mark} {metric}: pipeline={metrics[metric]:.3f} "
-            f"baseline={base} (threshold {threshold})"
+            f"baseline={base} (threshold {THRESHOLDS[metric]})"
         )
+    # Gated metrics not scored this run (e.g. claim support without a
+    # live judge) are shown, not hidden.
+    for metric in THRESHOLDS.keys() - gates.keys():
+        if metric in metrics:
+            print(
+                f"  --- {metric}: pipeline={metrics[metric]:.3f} "
+                f"baseline=n/a (not scored - no judge verdicts)"
+            )
     for key, (base_key, fmt) in informational.items():
         print(
             f"  --- {key}: pipeline={metrics[key]:{fmt}} "
@@ -150,6 +174,9 @@ def _print_scorecard(
 
 
 async def _main() -> int:
+    from app.core.logging import harden_console_streams
+
+    harden_console_streams()
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", action="store_true", help="write TREND.md")
     parser.add_argument(
@@ -193,7 +220,7 @@ async def _main() -> int:
     results = [await _run_case(c, settings, registry) for c in DATASET]
     metrics = aggregate_metrics(results)
     baseline = aggregate_baseline(results)
-    gates = _check_gates(metrics)
+    gates = _check_gates(metrics, _gate_thresholds(results))
 
     prompt_versions: dict[str, int] = {}
     for r in results:

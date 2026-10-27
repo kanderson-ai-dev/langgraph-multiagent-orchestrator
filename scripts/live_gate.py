@@ -411,6 +411,16 @@ async def _run_once(
         case_records.append(
             {
                 **metrics,
+                # Failure forensics: a case that dies before its first LLM
+                # call (status failed, $0) is undiagnosable from metrics
+                # alone — keep the state errors and transcript tail.
+                "errors": list(state.get("errors", []))
+                if isinstance(state, dict)
+                else [],
+                "transcript_tail": [
+                    getattr(m, "content", str(m))
+                    for m in (state.get("transcript", []) if isinstance(state, dict) else [])[-4:]
+                ],
                 "verdict": (
                     {
                         "verdict": latest.verdict,
@@ -465,7 +475,7 @@ async def _run_once(
     gates = _gate_report(agg, gate_thresholds)
     run = {
         "run_index": run_index,
-        "dataset": "heldout" if args.heldout else "dev",
+        "dataset": "both" if args.both else "heldout" if args.heldout else "dev",
         "git_sha": _git_sha(),
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "live": bool(args.live),
@@ -563,6 +573,9 @@ def main() -> int:
                         help="real LLM/search/scrape — spends money")
     parser.add_argument("--heldout", action="store_true",
                         help="sealed held-out set instead of the dev set")
+    parser.add_argument("--both", action="store_true",
+                        help="dev + held-out in one pass — the final proof "
+                             "configuration (14 quality + blocked cases)")
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--limit", type=int, default=0,
                         help="first N cases only (smoke)")
@@ -585,10 +598,18 @@ def main() -> int:
     if args.diagnose:
         return _diagnose_file(Path(args.diagnose))
 
-    if args.heldout:
+    from app.core.logging import harden_console_streams
+
+    harden_console_streams()
+
+    if args.both:
         from evaluation.dataset_heldout import HELDOUT
 
-        cases: list[EvalCase] = list(HELDOUT)
+        cases: list[EvalCase] = [*DATASET, *HELDOUT]
+    elif args.heldout:
+        from evaluation.dataset_heldout import HELDOUT
+
+        cases = list(HELDOUT)
     else:
         cases = list(DATASET)
     if args.only:

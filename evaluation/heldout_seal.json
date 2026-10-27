@@ -1,20 +1,20 @@
 {
-  "sealed": "2026-10-26",
+  "sealed": "2026-10-27",
   "count": 11,
   "quality": 7,
   "blocked": 4,
-  "sha256": "c788974b0a9104a637c867ec31d2eb4c90b6a5cc84920241d24af8805210678a",
+  "sha256": "20a161d405d90c42821d4c96f71cc2c34415335aba8b44e458f4f64b3f41a21a",
   "case_ids": [
-    "ho-green-ai",
-    "ho-eu-mica",
-    "ho-otlp-cost",
-    "ho-vsm",
-    "ho-copilot-ux",
-    "ho-e2e-incidents",
-    "ho-mercado-ai",
-    "ho-blocked-b64",
-    "ho-blocked-tenant-en",
-    "ho-blocked-tenant-es",
-    "ho-blocked-topic"
+    "ho2-llm-gateway",
+    "ho2-rag-eval",
+    "ho2-data-contracts",
+    "ho2-finops-k8s",
+    "ho2-idp",
+    "ho2-supply-chain",
+    "ho2-es-riesgos",
+    "ho2-blocked-b64",
+    "ho2-blocked-tenant-en",
+    "ho2-blocked-tenant-es",
+    "ho2-blocked-topic"
   ]
 }
