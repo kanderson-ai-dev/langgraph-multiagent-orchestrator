@@ -30,7 +30,7 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = "langgraph-multiagent-orchestrator"
-    app_version: str = "0.1.0"
+    app_version: str = "0.2.0"
     environment: Environment = "development"
     debug: bool = False
     api_prefix: str = "/api/v1"
