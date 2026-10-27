@@ -117,6 +117,34 @@ async function exportVersion(name, version) {
   }
 }
 
+/* Render a unified diff as colored line rows — green adds, red removals,
+ * muted context — so non-git readers can scan what changed at a glance. */
+function renderDiff(container, diff) {
+  container.innerHTML = "";
+  const view = document.createElement("div");
+  view.className = "diff-view";
+  const lines = diff.split("\n");
+  let adds = 0, dels = 0;
+  for (const line of lines) {
+    const row = document.createElement("div");
+    let cls = "diff-ctx";
+    if (line.startsWith("+++") || line.startsWith("---")) cls = "diff-file";
+    else if (line.startsWith("@@")) cls = "diff-hunk";
+    else if (line.startsWith("+")) { cls = "diff-add"; adds++; }
+    else if (line.startsWith("-")) { cls = "diff-del"; dels++; }
+    row.className = `diff-line ${cls}`;
+    row.textContent = line === "" ? " " : line;
+    view.appendChild(row);
+  }
+  const summary = document.createElement("p");
+  summary.className = "diff-summary";
+  summary.innerHTML =
+    `<span class="diff-add-text">+${adds} added</span> · ` +
+    `<span class="diff-del-text">−${dels} removed</span>`;
+  container.appendChild(summary);
+  container.appendChild(view);
+}
+
 async function runDiff() {
   const from = parseInt($("#diff-from").value, 10);
   const to = parseInt($("#diff-to").value, 10);
@@ -128,7 +156,7 @@ async function runDiff() {
   try {
     const d = await api(
       `/prompts/${encodeURIComponent(current.name)}/diff?from=${from}&to=${to}`);
-    out.innerHTML = `<pre class="diff-view">${escapeHtml(d.diff)}</pre>`;
+    renderDiff(out, d.diff || "");
   } catch (ex) {
     out.innerHTML = `<p class="modal-error">${escapeHtml(ex.message)}</p>`;
   }

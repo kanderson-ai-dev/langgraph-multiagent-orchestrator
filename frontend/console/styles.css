@@ -303,10 +303,19 @@ a.chip-evidence:hover { background: rgba(34, 197, 94, .08); }
 .status.pv-retired, .status.pv-rolled_back { color: var(--muted); }
 .diff-view {
   background: var(--panel-2); border: 1px solid var(--line);
-  border-radius: 8px; padding: 10px 12px; font-size: 12px;
+  border-radius: 8px; padding: 6px 0; font-size: 12px;
   max-height: 320px; overflow: auto; white-space: pre-wrap;
   font-family: ui-monospace, monospace;
 }
+.diff-line { padding: 1px 12px; white-space: pre-wrap; word-break: break-word; }
+.diff-add { background: rgba(63, 185, 80, 0.15); color: #7ee2a0; }
+.diff-del { background: rgba(248, 81, 73, 0.13); color: #ffa198; }
+.diff-hunk { color: var(--accent); background: rgba(88, 166, 255, 0.08); font-weight: 600; }
+.diff-file { color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--line); }
+.diff-ctx { color: var(--muted); }
+.diff-summary { font-size: 12px; margin: 4px 2px 8px; color: var(--muted); }
+.diff-add-text { color: var(--ok); font-weight: 600; }
+.diff-del-text { color: var(--danger); font-weight: 600; }
 .ok-text { color: var(--ok); font-size: 13px; }
 
 /* ── Performance tab ────────────────────────────────────────────────── */
