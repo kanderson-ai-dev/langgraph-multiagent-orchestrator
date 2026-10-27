@@ -270,3 +270,52 @@ def run_langfuse_experiment(
         },
     )
     return getattr(result, "run_name", None) or str(result)
+
+
+def _normalize_scores(scores: Any) -> dict[str, float]:
+    """The experiments endpoint may expose scores as a name→value map or
+    a list of score objects; both collapse to ``{name: float}``."""
+    if scores is None:
+        return {}
+    if isinstance(scores, dict):
+        return {
+            str(k): float(v)
+            for k, v in scores.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool)
+        }
+    out: dict[str, float] = {}
+    for s in scores:
+        name = getattr(s, "name", None)
+        value = getattr(s, "value", None)
+        if isinstance(name, str) and isinstance(value, (int, float)):
+            out[name] = float(value)
+    return out
+
+
+def fetch_experiment_scores(
+    client: Any, run_name: str
+) -> dict[str, float] | None:
+    """Read a run's aggregated scores via the **experiments** endpoint.
+
+    The legacy ``dataset_runs`` API predates Langfuse's
+    datasets→experiments rename; new reads go through
+    ``client.api.experiments.list``. ``None`` when the SDK/API is absent
+    or the run is unknown — callers degrade, never crash.
+    """
+    api = getattr(client, "api", None)
+    experiments = getattr(api, "experiments", None)
+    if experiments is None:
+        return None
+    try:
+        resp = experiments.list(
+            from_start_time=datetime(2000, 1, 1, tzinfo=UTC),
+            name=run_name,
+            fields="scores",
+            limit=5,
+        )
+    except Exception:
+        return None
+    for exp in getattr(resp, "data", None) or []:
+        if getattr(exp, "name", None) == run_name:
+            return _normalize_scores(getattr(exp, "scores", None))
+    return None

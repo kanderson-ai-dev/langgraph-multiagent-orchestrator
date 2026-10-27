@@ -62,6 +62,73 @@ def test_inputs_roundtrip_preserves_every_field() -> None:
             )
 
 
+def test_fetch_experiment_scores_reads_experiments_endpoint() -> None:
+    """Recorded-fixture read: a Langfuse ``Experiment`` payload (the
+    shape ``api.experiments.list`` returns) parses into score metrics —
+    the legacy ``dataset_runs`` endpoint is never touched."""
+    from types import SimpleNamespace
+
+    # Recorded response shape of GET /experiments (v4 SDK).
+    experiment_payload = {
+        "id": "exp-1",
+        "name": "run-abc123",
+        "description": "live",
+        "item_count": 7,
+        "dataset_id": "ds-1",
+        "metadata": {"mode": "live"},
+        "scores": {
+            "citation_support": 0.93,
+            "rubric_score": 4.2,
+            "judge_score": 4.1,
+            "converged": 1.0,
+        },
+    }
+
+    class _Resp:
+        data = [SimpleNamespace(**experiment_payload)]
+
+    class _Experiments:
+        def list(self, **kwargs: object) -> object:
+            assert kwargs["name"] == "run-abc123"
+            return _Resp()
+
+    class _Client:
+        api = SimpleNamespace(experiments=_Experiments())
+
+    scores = lfe.fetch_experiment_scores(_Client(), "run-abc123")
+    assert scores == {
+        "citation_support": 0.93,
+        "rubric_score": 4.2,
+        "judge_score": 4.1,
+        "converged": 1.0,
+    }
+
+
+def test_fetch_experiment_scores_degrades() -> None:
+    """No experiments resource, unknown run, or a raising API → None."""
+
+    class _Client:
+        pass
+
+    assert lfe.fetch_experiment_scores(_Client(), "x") is None
+
+    from types import SimpleNamespace
+
+    class _Empty:
+        def list(self, **kwargs: object) -> object:
+            return SimpleNamespace(data=[])
+
+    client = SimpleNamespace(api=SimpleNamespace(experiments=_Empty()))
+    assert lfe.fetch_experiment_scores(client, "nope") is None
+
+    class _Boom:
+        def list(self, **kwargs: object) -> object:
+            raise RuntimeError("api down")
+
+    client = SimpleNamespace(api=SimpleNamespace(experiments=_Boom()))
+    assert lfe.fetch_experiment_scores(client, "x") is None
+
+
 def test_ensure_dataset_upserts_stale_items() -> None:
     """Items whose stored input no longer matches are re-uploaded."""
     from evaluation.dataset import DATASET

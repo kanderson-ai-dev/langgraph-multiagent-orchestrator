@@ -30,6 +30,12 @@ flag permanently: if LangSmith quota returns, flipping
   (`citation_support`, `rubric_score`, `judge_score`, `converged`,
   `blocked_correctly`) land as experiment scores — the local
   `scorecard.json` remains the gate, Langfuse is only the viewer.
+- **Reads go through the experiments API**: score reads use
+  `client.api.experiments.list` (`fetch_experiment_scores` in
+  `evaluation/langfuse_eval.py`), not the legacy `dataset_runs`
+  endpoint — the datasets→experiments rename made the former the
+  supported read path. Reads are optional and degrade to `None` when
+  the SDK or run is absent.
 - **Optional self-host**: `docker-compose.langfuse.yml` runs the full stack
   locally with no external quota at all.
 
