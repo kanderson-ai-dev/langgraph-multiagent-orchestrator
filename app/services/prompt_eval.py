@@ -442,7 +442,15 @@ def brief_for_case(case: EvalCaseLike) -> Brief:
 def aggregate_metrics(results: list[dict[str, Any]]) -> dict[str, float]:
     normal = [r for r in results if not r["expected_blocked"]]
     blocked = [r for r in results if r["expected_blocked"]]
-    return {
+    # Adjudicated claim support exists only where a real judge produced
+    # verdicts; on stubs the key stays absent so every gate reads it as
+    # "not measured" instead of a fabricated 0.0 regression.
+    claim_rates = [
+        float(r["claim_support_rate"])
+        for r in normal
+        if r.get("claim_verdicts")
+    ]
+    agg = {
         "citation_support_rate": (
             sum(r["citation_support"] for r in normal) / len(normal) if normal else 0.0
         ),
@@ -483,20 +491,12 @@ def aggregate_metrics(results: list[dict[str, Any]]) -> dict[str, float]:
             if normal
             else 0.0
         ),
-        # Averaged over cases that produced verdicts — mirrors the live
-        # gate's aggregate so both scorecards carry the same schema.
-        "claim_support_rate_avg": (
-            (
-                lambda rates: sum(rates) / len(rates) if rates else 0.0
-            )(
-                [
-                    float(r["claim_support_rate"])
-                    for r in normal
-                    if r.get("claim_verdicts")
-                ]
-            )
-        ),
     }
+    # Averaged over cases that produced verdicts — mirrors the live
+    # gate's aggregate so both scorecards carry the same schema.
+    if claim_rates:
+        agg["claim_support_rate_avg"] = sum(claim_rates) / len(claim_rates)
+    return agg
 
 
 async def run_prompt_eval(

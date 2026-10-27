@@ -461,9 +461,8 @@ async def _run_once(
         for r in results
         if not r["expected_blocked"] and r.get("claim_verdicts")
     ]
-    agg["claim_support_rate_avg"] = (
-        sum(normal_rates) / len(normal_rates) if normal_rates else 0.0
-    )
+    if normal_rates:
+        agg["claim_support_rate_avg"] = sum(normal_rates) / len(normal_rates)
     normal = [r for r in results if not r["expected_blocked"]]
     blocked = [r for r in results if r["expected_blocked"]]
     # The claim-support gate is meaningful only where a judge adjudicated —

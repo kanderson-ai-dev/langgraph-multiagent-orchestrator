@@ -65,35 +65,20 @@ class _ReplaySearch:
 
 def _replay_settings() -> Settings:
     # A fake key is fine — vcr intercepts every httpx call, nothing leaves.
+    # chat_model_name must match the model the cassettes were recorded
+    # with (the held-out proof stack: gpt-4o-mini chat + gpt-4o judge) —
+    # the pipeline matcher compares request bodies, so a different model
+    # field would miss every recorded interaction.
     return Settings(
         _env_file=None,
         openai_api_key="test-replay-key",
+        chat_model_name="gpt-4o-mini",
+        judge_model="gpt-4o",
         scrape_delay_seconds=0.0,
     )
 
 
-@pytest.mark.parametrize(
-    "case_id",
-    [
-        pytest.param(
-            c,
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason=(
-                    "VCR cassettes were recorded against the pre-upgrade "
-                    "prompt shapes (first-1500-chars evidence, no "
-                    "previous-draft block). They are re-recorded against "
-                    "the final stack in the upgrade plan's Phase 8."
-                ),
-            ),
-        )
-        if c != "blocked-injection"
-        # Guardrail-blocked before any LLM call — its cassette is prompt-
-        # shape independent, so it still replays green today.
-        else c
-        for c in CASES_TO_RECORD
-    ],
-)
+@pytest.mark.parametrize("case_id", CASES_TO_RECORD)
 async def test_recorded_case_replays_offline(
     case_id: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
