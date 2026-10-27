@@ -148,11 +148,14 @@ langgraph==1.2.12
     # via
     #   langchain
     #   langgraph-multiagent-orchestrator
-langgraph-checkpoint==4.2.0
+langgraph-checkpoint==4.3.1
     # via
     #   langgraph
+    #   langgraph-checkpoint-postgres
     #   langgraph-checkpoint-sqlite
     #   langgraph-prebuilt
+langgraph-checkpoint-postgres==3.2.0
+    # via langgraph-multiagent-orchestrator
 langgraph-checkpoint-sqlite==3.1.1
     # via langgraph-multiagent-orchestrator
 langgraph-prebuilt==1.1.0
@@ -211,6 +214,7 @@ opentelemetry-semantic-conventions==0.66b1
     # via opentelemetry-sdk
 orjson==3.12.0
     # via
+    #   langgraph-checkpoint-postgres
     #   langgraph-sdk
     #   langsmith
 ormsgpack==1.12.2
@@ -260,9 +264,13 @@ protobuf==7.36.2
     #   googleapis-common-protos
     #   opentelemetry-proto
 psycopg==3.3.6
-    # via langgraph-multiagent-orchestrator
+    # via
+    #   langgraph-checkpoint-postgres
+    #   langgraph-multiagent-orchestrator
 psycopg-binary==3.3.6 ; implementation_name != 'pypy'
     # via psycopg
+psycopg-pool==3.3.3
+    # via langgraph-checkpoint-postgres
 py-serializable==2.1.0
     # via cyclonedx-python-lib
 pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
@@ -398,6 +406,7 @@ typing-extensions==4.16.0
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
     #   psycopg
+    #   psycopg-pool
     #   pydantic
     #   pydantic-core
     #   pyee

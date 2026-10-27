@@ -640,9 +640,11 @@ states. For true multi-replica state, `STORAGE_BACKEND=postgres` +
 `DATABASE_URL` swaps all seven stores — six `asyncpg` pools plus the
 synchronous prompt-registry store on `psycopg`
 (`app/services/pg/`, `app/services/prompt_store.py`); the same contract
-suite runs against both backends, and the LangGraph checkpointer stays on
-its own path (`CHECKPOINT_DB_PATH`) either way — a Postgres saver is the
-documented next step.
+suite runs against both backends. On the postgres backend the LangGraph
+checkpointer moves to the same DSN (`AsyncPostgresSaver` on an
+app-lifespan-owned pool), so `interrupt()` pauses can be resumed by any
+replica — proven by `tests/test_postgres_checkpointer.py` in the CI
+`postgres-contract` job. On sqlite it stays on `CHECKPOINT_DB_PATH`.
 
 ## Known limitations & next steps
 
@@ -662,11 +664,10 @@ documented next step.
 - The default SQLite stores run WAL + a 5 s busy timeout
   (concurrency-tested — see ADR 0003) but remain single-node,
   single-writer. `STORAGE_BACKEND=postgres` switches all seven stores
-  (incl. the prompt-registry overlay) to
-  Postgres for multi-replica deployments (optional
-  `docker-compose.postgres.yml`; contract-tested in CI); the LangGraph
-  checkpointer is still SQLite-only either way — resume state stays
-  single-host until it moves to a Postgres saver.
+  (incl. the prompt-registry overlay) **and** the LangGraph checkpointer
+  to Postgres for multi-replica deployments (optional
+  `docker-compose.postgres.yml`; contract-tested in CI, incl. a
+  cross-instance `interrupt()` → resume proof).
 - LLM-as-judge and live experiments require live credentials; the
   offline scorecard intentionally validates the deterministic pipeline
   (ADR 0004).

@@ -75,10 +75,24 @@ The "next step" is now implemented, not just documented:
   a protocol). `tests/test_store_contract.py` runs the same behavioral
   contract against both backends — Postgres joins the matrix only when
   `TEST_DATABASE_URL` is set (CI runs it in a service container).
-- Not yet on Postgres: the LangGraph checkpointer still uses
-  `checkpoint_db_path` (SQLite `AsyncSqliteSaver`); upstream ships a
-  `langgraph-checkpoint-postgres` saver as the documented next step —
-  resume-after-crash still works, it just shares the SQLite single-host
-  caveat. `scripts/audit_anchor.py --check` also reads the jobs table
-  with `sqlite3` directly (anchor-vs-API checks via `anchor_match` work
-  on either backend).
+- `scripts/audit_anchor.py --check` reads the jobs table with `sqlite3`
+  directly (anchor-vs-API checks via `anchor_match` work on either
+  backend).
+
+## Amendment — Postgres checkpointer (delivered, 2026-10)
+
+The checkpointer caveat above is now closed:
+
+- `STORAGE_BACKEND=postgres` builds the LangGraph checkpointer on the
+  same DSN via `langgraph-checkpoint-postgres`' `AsyncPostgresSaver` —
+  an `AsyncConnectionPool` owned by the app lifespan
+  (`postgres_checkpointer` in `app/services/checkpointer.py`), with
+  `saver.setup()` creating the checkpoint tables on first boot.
+- Consequence: `interrupt()` pauses are shared state — any replica can
+  serve `POST /jobs/{id}/review` on a thread another replica started.
+  `tests/test_postgres_checkpointer.py` proves exactly that: run to the
+  interrupt on saver instance A, close its pool, then resume from a
+  second saver instance on the same DSN (runs under
+  `TEST_DATABASE_URL`, wired into the CI `postgres-contract` job).
+- SQLite stays the default backend; `checkpoint_db_path` is unused on
+  postgres deployments.

@@ -159,12 +159,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # dependency overrides before the lifespan runs.
     async with AsyncExitStack() as stack:
         if not hasattr(app.state, "runner"):
-            # Durable checkpointer: HITL resume survives process restarts.
-            from app.services.checkpointer import sqlite_checkpointer
-
-            saver = await stack.enter_async_context(
-                sqlite_checkpointer(settings.checkpoint_db_path)
+            # Durable checkpointer: HITL resume survives process restarts
+            # — and on the postgres backend, across replicas too.
+            from app.services.checkpointer import (
+                postgres_checkpointer,
+                sqlite_checkpointer,
             )
+
+            if (
+                settings.storage_backend == "postgres"
+                and settings.database_url
+            ):
+                saver = await stack.enter_async_context(
+                    postgres_checkpointer(
+                        settings.database_url.get_secret_value()
+                    )
+                )
+            else:
+                saver = await stack.enter_async_context(
+                    sqlite_checkpointer(settings.checkpoint_db_path)
+                )
             app.state.stores = build_stores(settings)
             app.state.runner = build_runner(
                 settings, checkpointer=saver, stores=app.state.stores
