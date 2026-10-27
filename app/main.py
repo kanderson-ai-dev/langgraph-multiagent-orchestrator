@@ -240,6 +240,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await sweeper
         with contextlib.suppress(Exception):
             await app.state.runner.aclose()
+        # Sync-side cleanup: the prompt-registry overlay keeps one
+        # long-lived sqlite3 connection — close it (and any test-set
+        # override) so teardown never leaves unclosed databases behind.
+        with contextlib.suppress(Exception):
+            registry = getattr(app.state, "prompt_registry", None)
+            if registry is not None:
+                registry.close()
+        with contextlib.suppress(Exception):
+            stores = getattr(app.state, "stores", None)
+            if stores is not None:
+                stores.prompt_store.close()
     shutdown_tracing()
     logger.info("app_shutdown")
 

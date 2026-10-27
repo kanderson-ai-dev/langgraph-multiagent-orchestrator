@@ -120,6 +120,7 @@ class PromptRegistry:
     ) -> None:
         self._versions = versions
         self._store = store
+        self._owns_store = False
         self._signing_key = signing_key
         # Verification keyring {key_id: key}: current key first, then
         # retired keys — signatures minted pre-rotation stay verifiable.
@@ -161,6 +162,7 @@ class PromptRegistry:
             raise PromptRegistryError(f"prompts directory missing: {prompts_dir}")
         versions = cls._load_yaml(prompts_dir)
 
+        owns_store = store is None and db_path is not None
         if store is None and db_path is not None:
             store = SqlitePromptStore(db_path)
         yaml_versions = versions
@@ -170,13 +172,26 @@ class PromptRegistry:
             versions = cls._merge_db(store, versions)
 
         cls._validate(versions)
-        return cls(
+        reg = cls(
             versions,
             store,
             yaml_versions=yaml_versions,
             signing_key=signing_key,
             previous_keys=previous_keys,
         )
+        # The registry owns only the store it created itself — injected
+        # stores are the caller's to close.
+        reg._owns_store = owns_store
+        return reg
+
+    def close(self) -> None:
+        """Close the lifecycle store this registry created (idempotent).
+
+        Injected stores are the caller's responsibility — ``close`` is a
+        no-op for them.
+        """
+        if getattr(self, "_owns_store", False) and self._store is not None:
+            self._store.close()
 
     @staticmethod
     def _load_yaml(prompts_dir: Path) -> dict[tuple[str, int], PromptVersion]:

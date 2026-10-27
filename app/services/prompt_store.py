@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import weakref
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
@@ -193,6 +194,10 @@ class SqlitePromptStore:
             conn = connect_sync(self._db_path, check_same_thread=False)
             conn.row_factory = sqlite3.Row
             self._conn = conn
+            # Finalizer keeps the conn alive past the store's own GC and
+            # closes it there — explicit close() stays the eager path, so
+            # a forgotten store never leaves an unclosed database behind.
+            weakref.finalize(self, conn.close)
         return self._conn
 
     def migrate(self) -> None:

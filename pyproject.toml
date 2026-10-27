@@ -80,9 +80,11 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 filterwarnings = [
-    # Unclosed aiosqlite connections / dead-loop worker posts mean a
-    # job task was orphaned at shutdown — an error, not a warning.
-    "error::ResourceWarning:aiosqlite",
+    # Leaked database connections — sync (sqlite3) or async (aiosqlite) —
+    # mean a store or task was orphaned at teardown. Message-matched
+    # because __del__-issued warnings attribute to wherever GC runs.
+    "error:unclosed database:ResourceWarning",
+    "error:.*deleted before being closed:ResourceWarning",
     "error::pytest.PytestUnhandledThreadExceptionWarning",
     "error::pytest.PytestUnraisableExceptionWarning",
 ]
