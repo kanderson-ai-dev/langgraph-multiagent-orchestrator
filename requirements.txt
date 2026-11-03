@@ -160,7 +160,7 @@ langgraph-checkpoint-sqlite==3.1.1
     # via langgraph-multiagent-orchestrator
 langgraph-prebuilt==1.1.0
     # via langgraph
-langgraph-sdk==0.4.5
+langgraph-sdk==0.4.11
     # via langgraph
 langsmith==0.14.0
     # via langchain-core
@@ -300,7 +300,7 @@ pyjwt==2.15.0
     # via langgraph-multiagent-orchestrator
 pyparsing==3.3.3
     # via pip-requirements-parser
-pypdf==6.21.2
+pypdf==6.21.4
     # via langgraph-multiagent-orchestrator
 pypdfium2==5.13.0
     # via pdfplumber
