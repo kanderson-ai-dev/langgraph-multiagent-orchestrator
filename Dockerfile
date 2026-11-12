@@ -2,7 +2,7 @@
 
 # Base image pinned by digest (python:3.13-slim) — re-resolve the
 # digest by hand when the base image is refreshed.
-ARG PY_SLIM=python:3.13-slim@sha256:cf50a4f6ac4f026458b08d5222023d700ac806410dff5e9ca8728fa44f2b850f
+ARG PY_SLIM=python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
 
 # ── builder: resolve locked runtime deps, nothing ships from here ─────────────
 FROM ${PY_SLIM} AS builder
@@ -49,8 +49,13 @@ COPY evaluation/ evaluation/
 # Non-root runtime user; data/ holds the SQLite job/checkpoint stores and is
 # the volume mount point for persistence. pip/setuptools ship in the slim base
 # but are useless at runtime — removing them shrinks the image and the
-# post-compromise toolset (no interpreter-assisted installs).
-RUN rm -rf /usr/local/lib/python3.13/site-packages/pip* \
+# post-compromise toolset (no interpreter-assisted installs). The zlib1g
+# upgrade pulls a fix published in trixie-security that the pinned base
+# image has not absorbed yet (official-image rebuilds lag Debian security).
+RUN apt-get update \
+    && apt-get install -y --only-upgrade --no-install-recommends zlib1g \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /usr/local/lib/python3.13/site-packages/pip* \
        /usr/local/lib/python3.13/site-packages/setuptools* \
        /usr/local/lib/python3.13/site-packages/_distutils_hack \
        /usr/local/bin/pip* \
