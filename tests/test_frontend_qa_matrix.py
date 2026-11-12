@@ -447,10 +447,28 @@ def _text_scan(page: Any, selector: str) -> list[str]:
 # ── the matrix ───────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.slug for c in CASES])
-def test_qa_matrix_row(case: Case, tmp_path: Path) -> None:
+@pytest.fixture(scope="module")
+def _browser() -> Iterator[Any]:
+    """One Chromium for the whole matrix — launching it per row cost
+    ~1.4 s; a fresh page per row still isolates cookies/storage.
+
+    Module scope, not session: sync_playwright keeps an event loop
+    running in a dispatcher thread for its lifetime, and on py3.12+
+    asyncio._get_running_loop() is process-wide — a session-scoped
+    playwright would poison every later async test's runner.run."""
     if sync_playwright is None:
         pytest.skip("playwright not installed")
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.launch(channel="chrome", headless=True)
+        except Exception:
+            browser = p.chromium.launch(headless=True)
+        yield browser
+        browser.close()
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.slug for c in CASES])
+def test_qa_matrix_row(case: Case, tmp_path: Path, _browser: Any) -> None:
     SHOTS_DIR.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
     errors: list[str] = []
@@ -462,13 +480,11 @@ def test_qa_matrix_row(case: Case, tmp_path: Path) -> None:
     }
     _RESULTS.append(record)
 
-    with _serve(case, tmp_path) as srv, sync_playwright() as p:
+    with _serve(case, tmp_path) as srv:
+        page = _browser.new_page(
+            viewport={"width": 1366, "height": 900}, bypass_csp=True
+        )
         try:
-            browser = p.chromium.launch(channel="chrome", headless=True)
-        except Exception:
-            browser = p.chromium.launch(headless=True)
-        try:
-            page = browser.new_page(viewport={"width": 1366, "height": 900}, bypass_csp=True)
             page.on("pageerror", lambda e: errors.append(str(e)))
 
             def _console(m: Any) -> None:
@@ -598,7 +614,7 @@ def test_qa_matrix_row(case: Case, tmp_path: Path) -> None:
             assert not errors, f"console/page errors: {errors[:3]}"
             record["ok"] = True
         finally:
-            browser.close()
+            page.close()
             record["wall_s"] = round(time.monotonic() - t0, 1)
 
 
