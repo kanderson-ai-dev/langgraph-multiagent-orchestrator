@@ -98,28 +98,111 @@ the standard of a paid engagement, not a portfolio toy.
 
 ## 🏗️ Architecture
 
+The **runtime flow** — generated from the compiled graph by
+`scripts/gen_architecture.py` (a drift test keeps it honest). Dashed edges
+are Supervisor routing decisions; solid edges are unconditional wiring:
+
+<!-- BEGIN GENERATED: runtime-flow -->
 ```mermaid
-graph TD
-    START[START] --> input_guardrail[input_guardrail]
-    input_guardrail -- "blocked" --> rejection_output[rejection_output] --> END[END]
-    input_guardrail -- "safe" --> supervisor[Supervisor<br/>LLM router]
-    supervisor -->|"Send() fan-out ×N"| workers["workers ×N<br/>parallel mandates"]
-    workers --> supervisor
-    supervisor -->|"next_worker"| researcher[researcher]
-    supervisor -->|"next_worker"| specialists["financial_analyst /<br/>compliance_analyst"]
-    supervisor -->|"next_worker"| writer[writer]
-    supervisor -->|"next_worker"| reviewer[reviewer]
-    researcher --> supervisor
-    specialists --> supervisor
-    writer --> supervisor
-    reviewer -- "revise (round < max)" --> supervisor
-    supervisor -- "budget exhausted / rounds exhausted" --> human_review["human_review<br/>interrupt()"]
-    supervisor -- "approved" --> report_assembler[report_assembler]
-    human_review -- "edit / fund" --> supervisor
-    human_review -- "approve" --> report_assembler
-    human_review -- "reject" --> rejection_output
-    report_assembler -->|"citations re-verified + audit seal"| END
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([START])
+	input_guardrail(input_guardrail)
+	supervisor("Supervisor<br/>LLM router")
+	human_review("human_review<br/>interrupt()")
+	report_assembler(report_assembler)
+	output_guardrail(output_guardrail)
+	rejection_output(rejection_output)
+	researcher(researcher)
+	writer(writer)
+	reviewer(reviewer)
+	financial_analyst(financial_analyst)
+	compliance_analyst(compliance_analyst)
+	__end__([END])
+	__start__ --> input_guardrail;
+	compliance_analyst --> supervisor;
+	financial_analyst --> supervisor;
+	human_review -. "reject" .-> rejection_output;
+	human_review -. "approve" .-> report_assembler;
+	human_review -. "fund" .-> supervisor;
+	human_review -. "edit" .-> writer;
+	input_guardrail -. "blocked" .-> rejection_output;
+	input_guardrail -. "safe" .-> supervisor;
+	report_assembler --> output_guardrail;
+	researcher --> supervisor;
+	reviewer --> supervisor;
+	supervisor -. "next_worker" .-> compliance_analyst;
+	supervisor -. "next_worker" .-> financial_analyst;
+	supervisor -. "budget / rounds exhausted" .-> human_review;
+	supervisor -. "approved" .-> report_assembler;
+	supervisor -. "next_worker" .-> researcher;
+	supervisor -. "next_worker" .-> reviewer;
+	supervisor -. "next_worker" .-> writer;
+	writer --> supervisor;
+	output_guardrail --> __end__;
+	rejection_output --> __end__;
+	supervisor -. "Send() fan-out" .-> workers["workers ×N<br/>parallel mandates"]:::alias;
+	workers --> supervisor;
+	classDef alias fill:#fff8e1,stroke:#bfa46f,stroke-dasharray:4 3
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
 ```
+<!-- END GENERATED: runtime-flow -->
+
+Prompts are **injected, not routed** — the Prompt Registry is a dependency
+of every agent, not a graph node, which is why it has no edges above. The
+**system view** shows where it lives:
+
+```mermaid
+flowchart LR
+    subgraph entry["Entry"]
+        console["Console + REST API<br/>/api/v1/*"]
+        runner["Job runner<br/>job store · SSE stream"]
+    end
+
+    subgraph orch["LangGraph orchestration (runtime flow above)"]
+        direction TB
+        supervisor["supervisor"]
+        researcher["researcher"]
+        financial_analyst["financial_analyst"]
+        compliance_analyst["compliance_analyst"]
+        writer["writer"]
+        reviewer["reviewer"]
+    end
+
+    subgraph platform["Prompt platform"]
+        direction TB
+        seeds["prompts/#lt;name#gt;/vN.yaml<br/>committed seeds"]
+        store[("PromptStore<br/>SQLite · Postgres")]
+        api["/api/v1/prompts/*<br/>+ console Registry tab"]
+        lifecycle["draft → candidate → A/B<br/>→ promoted → retired<br/>run_ab_eval + EDD_THRESHOLDS gate"]
+        registry["PROMPT REGISTRY<br/>render(role) → promoted template"]:::registry
+    end
+
+    prov["provenance: prompt_name · version · sha256<br/>→ trace metadata (LangSmith · Langfuse)<br/>→ audit hash-chain"]
+
+    console --> runner --> supervisor
+    supervisor -.-> researcher & financial_analyst & compliance_analyst & writer & reviewer
+    seeds --> store
+    api --> lifecycle --> store
+    store <--> registry
+    supervisor & researcher & financial_analyst & compliance_analyst & writer & reviewer -.-> registry
+    registry -- "prompt_name / version / sha256" --> prov
+
+    classDef registry fill:#ffe0b2,stroke:#e65100,stroke-width:4px,color:#000
+```
+
+Every agent resolves its system prompt via `prompts.render(role)` — the
+dashed fan into the registry — and every LLM generation carries
+`prompt_name` / `prompt_version` / `prompt_sha256` provenance into traces
+and the audit hash-chain. Lifecycle, metric-gated promotion and the
+console tab: [🧬 Prompt Registry](#-prompt-registry) ·
+[ADR 0002](docs/adr/0002-prompt-registry-storage.md).
 
 **Dynamic teams by `report_type`:**
 
