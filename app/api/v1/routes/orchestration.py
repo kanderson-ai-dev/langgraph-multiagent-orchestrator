@@ -197,8 +197,14 @@ async def stream(
                     break
                 if pending is None:
                     pending = asyncio.ensure_future(anext(it))
+                # Wait at most until the deadline — heartbeat-ticks must
+                # never overshoot the stream's lifetime cap.
+                remaining = deadline - time.monotonic()
                 done, _ = await asyncio.wait(
-                    {pending}, timeout=settings.sse_heartbeat_seconds
+                    {pending},
+                    timeout=min(
+                        settings.sse_heartbeat_seconds, max(remaining, 0)
+                    ),
                 )
                 if not done:
                     yield ": ping\n\n"

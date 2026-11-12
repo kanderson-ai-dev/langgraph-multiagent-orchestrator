@@ -127,10 +127,15 @@ def test_heartbeat_frames_on_idle_stream(tmp_path: Any) -> None:
 
 
 def test_stream_has_lifetime_cap(tmp_path: Any) -> None:
+    """The cap must not overshoot by a full heartbeat: with a 10 s tick
+    and a 0.2 s cap the stream ends in well under a second."""
+    import time
+
     with _client(tmp_path, sse_heartbeat_seconds=10.0,
                  sse_max_stream_seconds=0.2) as client:
         job_id = _parked_job(client)
         saw_timeout = False
+        t0 = time.monotonic()
         with client.stream(
             "GET", f"/api/v1/orchestration/reports/{job_id}/stream"
         ) as r:
@@ -140,7 +145,9 @@ def test_stream_has_lifetime_cap(tmp_path: Any) -> None:
                     break
                 if i > 200:
                     break
+        elapsed = time.monotonic() - t0
         assert saw_timeout
+        assert elapsed < 2.0, f"stream outlived its cap: {elapsed:.2f}s"
 
 
 def test_terminal_event_closes_stream(tmp_path: Any) -> None:
