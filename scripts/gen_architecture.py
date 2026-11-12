@@ -75,10 +75,9 @@ EDGE_LABELS = {
 # readable. ``tests/test_architecture_diagram.py`` whitelists this name.
 FANOUT = (
     '\tsupervisor -. "Send() fan-out" .-> '
-    'workers["workers ×N<br/>parallel mandates"]:::alias;',
+    'workers["workers ×N<br/>parallel mandates"];',
     "\tworkers --> supervisor;",
 )
-ALIAS_CLASSDEF = "\tclassDef alias fill:#fff8e1,stroke:#bfa46f,stroke-dasharray:4 3"
 
 _NODE_RE = re.compile(r"^(\w+)(\(?\[?.*\)?\]?)(:::\w+)?$")
 _EDGE_RE = re.compile(r"^(\w+)\s+(-->|-\.->|-\..*?\.->)\s+(\w+);$")
@@ -99,13 +98,12 @@ def _node_line(raw: str) -> str:
     m = _NODE_RE.match(raw)
     if not m:
         return f"\t{raw}"
-    node_id, cls = m.group(1), m.group(3) or ""
-    label = NODE_LABELS.get(node_id)
+    node_id, label = m.group(1), NODE_LABELS.get(m.group(1))
     if label is None:
         return f"\t{raw}"
     if node_id in ("__start__", "__end__"):
-        return f"\t{node_id}([{label}]){cls}"
-    return f'\t{node_id}("{label}"){cls}'
+        return f"\t{node_id}([{label}])"
+    return f'\t{node_id}("{label}")'
 
 
 def _edge_line(raw: str) -> str:
@@ -154,11 +152,12 @@ def generate_runtime_block() -> str:
             out.append(_edge_line(stripped))
             continue
         if stripped.startswith("classDef"):
+            # Drop theme fills entirely — the renderer's default theme
+            # (dark on GitHub dark mode) reads better than LangGraph's
+            # pastel classDefs, matching the pre-generated diagram.
             if not fanout_done:
                 out.extend(FANOUT)
-                out.append(ALIAS_CLASSDEF)
                 fanout_done = True
-            out.append(line)
             continue
         out.append(_node_line(stripped))
     return "\n".join(out) + "\n"

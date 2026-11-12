@@ -145,12 +145,8 @@ graph TD;
 	writer --> supervisor;
 	output_guardrail --> __end__;
 	rejection_output --> __end__;
-	supervisor -. "Send() fan-out" .-> workers["workers ×N<br/>parallel mandates"]:::alias;
+	supervisor -. "Send() fan-out" .-> workers["workers ×N<br/>parallel mandates"];
 	workers --> supervisor;
-	classDef alias fill:#fff8e1,stroke:#bfa46f,stroke-dasharray:4 3
-	classDef default fill:#f2f0ff,line-height:1.2
-	classDef first fill-opacity:0
-	classDef last fill:#bfb6fc
 ```
 <!-- END GENERATED: runtime-flow -->
 
@@ -181,7 +177,7 @@ flowchart LR
         store[("PromptStore<br/>SQLite · Postgres")]
         api["/api/v1/prompts/*<br/>+ console Registry tab"]
         lifecycle["draft → candidate → A/B<br/>→ promoted → retired<br/>run_ab_eval + EDD_THRESHOLDS gate"]
-        registry["PROMPT REGISTRY<br/>render(role) → promoted template"]:::registry
+        registry["PROMPT REGISTRY<br/>render(role) → promoted template"]
     end
 
     prov["provenance: prompt_name · version · sha256<br/>→ trace metadata (LangSmith · Langfuse)<br/>→ audit hash-chain"]
@@ -193,8 +189,6 @@ flowchart LR
     store <--> registry
     supervisor & researcher & financial_analyst & compliance_analyst & writer & reviewer -.-> registry
     registry -- "prompt_name / version / sha256" --> prov
-
-    classDef registry fill:#ffe0b2,stroke:#e65100,stroke-width:4px,color:#000
 ```
 
 Every agent resolves its system prompt via `prompts.render(role)` — the
