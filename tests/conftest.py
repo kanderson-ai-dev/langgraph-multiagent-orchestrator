@@ -7,6 +7,7 @@ API keys. Tests that legitimately need live credentials are marked with
 
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from _pytest.config import Config
@@ -31,6 +32,30 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:  #
                 item.add_marker(
                     pytest.mark.skip(reason=f"{env_var} not configured — skipping live test")
                 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_audit_anchor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test-sealed jobs must not append to the real ``data/audit_anchor.jsonl``.
+
+    ``Settings`` reads the env var even with ``_env_file=None``, so every
+    test-built runner picks up the per-test path automatically."""
+    monkeypatch.setenv("AUDIT_ANCHOR_PATH", str(tmp_path / "audit_anchor.jsonl"))
+
+
+@pytest.fixture(autouse=True)
+def _gc_collect_on_teardown() -> Iterator[None]:
+    """Force a GC pass at every teardown.
+
+    ``sqlite3.Connection.__del__`` reports "unclosed database" wherever
+    the collector happens to run — without this fixture that is a random
+    later test (the historical flake). Collecting at teardown keeps the
+    warning inside the test that leaked the connection.
+    """
+    yield
+    import gc
+
+    gc.collect()
 
 
 @pytest.fixture()

@@ -5,8 +5,12 @@ and every store that relied on ``open_connection``/``connect`` raised
 ``sqlite3.OperationalError: unable to open database file``.
 """
 
+import asyncio
+import gc
 import os
+import sqlite3
 import stat
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -68,6 +72,42 @@ async def test_connect_relative_path_creates_dirs(
 async def test_memory_database_still_works() -> None:
     async with connect(":memory:") as db:
         await db.execute("SELECT 1")
+
+
+async def test_cancelled_open_connection_closes_the_thread_conn(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    """Cancelling ``await db`` mid-connect must not orphan the worker
+    thread's ``sqlite3.Connection`` — before the shielded connect, a
+    cancel left the real connection open as a dead future's result.
+
+    The connector is slowed so the cancel deterministically lands inside
+    the connect await; every connection the thread produced must end up
+    closed (``conn.execute`` on a closed connection raises
+    ``ProgrammingError``)."""
+    created: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+
+    def _slow_connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        time.sleep(0.25)
+        conn = real_connect(*args, **kwargs)
+        created.append(conn)
+        return conn
+
+    monkeypatch.setattr(sqlite3, "connect", _slow_connect)
+    task = asyncio.create_task(open_connection(str(tmp_path / "x.sqlite")))
+    await asyncio.sleep(0.05)  # inside the connect await while the thread works
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # Let the worker thread finish the connector + the queued close.
+    await asyncio.sleep(0.4)
+    assert created, "connector never ran — cancel landed too early"
+    # Drop the test's references: an orphaned connection warns
+    # "unclosed database" here (and fails the suite via the teardown
+    # unraisable check); a properly closed one is collected silently.
+    created.clear()
+    gc.collect()
 
 
 def test_connect_sync_memory_database_still_works() -> None:

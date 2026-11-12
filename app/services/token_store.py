@@ -10,6 +10,7 @@ could no longer verify anyway, so the table stays small.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -51,11 +52,19 @@ class SqliteTokenStore:
 
     async def _db(self) -> aiosqlite.Connection:
         db = await open_connection(self._db_path)
-        db.row_factory = sqlite3.Row
-        if not self._initialized:
-            await db.executescript(_SCHEMA)
-            await db.commit()
-            self._initialized = True
+        try:
+            db.row_factory = sqlite3.Row
+            if not self._initialized:
+                await db.executescript(_SCHEMA)
+                await db.commit()
+                self._initialized = True
+        except BaseException:
+            # Schema failure or a cancelled caller must not strand the
+            # connection — nobody else owns it yet. The close is
+            # best-effort so the original error wins.
+            with suppress(Exception):
+                await db.close()
+            raise
         return db
 
     async def revoke(self, jti: str, expires_at: datetime) -> None:

@@ -8,6 +8,7 @@ issuance; only the SHA-256 hash and a short display prefix persist.
 import hashlib
 import secrets
 import sqlite3
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -72,17 +73,25 @@ class WorkspaceStore:
 
     async def _db(self) -> aiosqlite.Connection:
         db = await open_connection(self._db_path)
-        db.row_factory = sqlite3.Row
-        if not self._initialized:
-            await db.executescript(_SCHEMA)
-            cursor = await db.execute("PRAGMA table_info(members)")
-            existing = {row[1] for row in await cursor.fetchall()}
-            for stmt in _MIGRATIONS:
-                column = stmt.rsplit(" ", 2)[-2]
-                if column not in existing:
-                    await db.execute(stmt)
-            await db.commit()
-            self._initialized = True
+        try:
+            db.row_factory = sqlite3.Row
+            if not self._initialized:
+                await db.executescript(_SCHEMA)
+                cursor = await db.execute("PRAGMA table_info(members)")
+                existing = {row[1] for row in await cursor.fetchall()}
+                for stmt in _MIGRATIONS:
+                    column = stmt.rsplit(" ", 2)[-2]
+                    if column not in existing:
+                        await db.execute(stmt)
+                await db.commit()
+                self._initialized = True
+        except BaseException:
+            # Schema/migration failure (or a cancelled caller) must not
+            # strand the connection — nobody else owns it yet. The close
+            # is best-effort so the original error wins.
+            with suppress(Exception):
+                await db.close()
+            raise
         return db
 
     # ─── bootstrap / migration ──────────────────────────────────────────

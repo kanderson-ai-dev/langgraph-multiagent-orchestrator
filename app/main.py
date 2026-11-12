@@ -186,8 +186,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.job_store = app.state.stores.job_store
             app.state.usage_store = app.state.stores.usage_store
         if not hasattr(app.state, "stores"):
-            # Tests that pre-set only the runner get the default backend.
-            app.state.stores = build_stores(settings)
+            # Tests that pre-set only the runner still need the sibling
+            # stores (workspace/feedback/token/prompt). Build them on the
+            # runner's own database so a temp-path runner never touches
+            # the real default file.
+            runner_store = getattr(
+                getattr(app.state, "runner", None), "job_store", None
+            )
+            db_path = getattr(runner_store, "_db_path", None)
+            app.state.stores = build_stores(settings, db_path=db_path or None)
         stores = app.state.stores
         if not hasattr(app.state, "prompt_registry"):
             app.state.prompt_registry = app.state.runner.prompt_registry

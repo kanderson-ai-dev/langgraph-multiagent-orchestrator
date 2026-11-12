@@ -75,11 +75,18 @@ async def open_connection(path: str) -> aiosqlite.Connection:
     The caller owns the returned connection and must close it.
     """
     _ensure_parent(path)
-    # ``connect()`` spawns the worker thread synchronously; split the
-    # await so a cancellation lands inside the try where close() runs.
+    # ``await db`` runs aiosqlite's connector on a worker thread and
+    # publishes the result as ``db._connection``. If the awaiting task is
+    # cancelled at that point, aiosqlite's ``_connect`` marks the wrapper
+    # ``_connection = None`` while the thread still creates the
+    # ``sqlite3.Connection`` — an orphan a later ``close()`` cannot reach,
+    # and GC reports "unclosed database". Shield the inner connect so the
+    # wrapper always reflects what the thread produced; on failure the
+    # connect task is awaited to quiesce so ``db.close()`` really closes.
     db = aiosqlite.connect(path)
+    connect_task = asyncio.ensure_future(db)
     try:
-        await db
+        await asyncio.shield(connect_task)
         for attempt in range(6):
             try:
                 await _apply_pragmas(db)
@@ -91,7 +98,15 @@ async def open_connection(path: str) -> aiosqlite.Connection:
         return db  # unreachable; keeps the return type obvious
     except BaseException:
         # Cancellation (e.g. runner shutdown mid-open) must not strand a
-        # live worker thread — close before propagating.
+        # live worker thread — let the shielded connect settle, then
+        # close before propagating.
+        while not connect_task.done():
+            with suppress(asyncio.CancelledError):
+                await asyncio.wait({connect_task}, timeout=0.05)
+        with suppress(asyncio.CancelledError):
+            # Retrieve the outcome so a failed connect never surfaces
+            # as "Task exception was never retrieved".
+            connect_task.exception()
         with suppress(Exception):
             await db.close()
         raise

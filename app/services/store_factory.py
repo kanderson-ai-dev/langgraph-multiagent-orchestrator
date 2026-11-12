@@ -50,11 +50,16 @@ class AppStores:
     prompt_store: PromptStoreProtocol
 
 
-def build_stores(settings: Settings) -> AppStores:
-    """Construct the store set for ``settings.storage_backend``."""
+def build_stores(settings: Settings, db_path: str | None = None) -> AppStores:
+    """Construct the store set for ``settings.storage_backend``.
+
+    ``db_path`` overrides ``settings.database_path`` on the sqlite
+    backend — the lifespan uses it when a test pre-set the runner against
+    a temp database, so sibling stores never land on the real file.
+    """
     backend = settings.storage_backend
     if backend == "sqlite":
-        path = settings.database_path
+        path = db_path or settings.database_path
         return AppStores(
             job_store=JobStore(path),
             usage_store=UsageStore(path),
