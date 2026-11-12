@@ -44,6 +44,27 @@ def _isolate_audit_anchor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.fixture(autouse=True)
+def _cheap_bcrypt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drop the bcrypt work factor to 4 for the whole suite.
+
+    Hashing/verifying at the production cost (12, ~0.2 s/operation)
+    dominated the login/member tests; ``test_security`` pins the real
+    default. ``verify_password`` of pre-made hashes is unaffected."""
+    import bcrypt
+
+    real_gensalt = bcrypt.gensalt
+
+    def _cheap(*args: object, **kwargs: object) -> object:
+        if args:
+            args = (4, *args[1:])
+        else:
+            kwargs["rounds"] = 4
+        return real_gensalt(*args, **kwargs)
+
+    monkeypatch.setattr(bcrypt, "gensalt", _cheap)
+
+
+@pytest.fixture(autouse=True)
 def _gc_collect_on_teardown() -> Iterator[None]:
     """Force a GC pass at every teardown.
 

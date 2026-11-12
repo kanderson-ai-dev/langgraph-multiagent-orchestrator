@@ -109,8 +109,9 @@ _REPLAY_SETTINGS: dict[str, Any] = {
 
 
 def test_heartbeat_frames_on_idle_stream(tmp_path: Any) -> None:
-    with _client(tmp_path, sse_heartbeat_seconds=0.05,
-                 sse_max_stream_seconds=30.0) as client:
+    # _REPLAY_SETTINGS caps the stream at 0.4 s — TestClient buffers the
+    # body, so the cap (not the break) is what ends the request.
+    with _client(tmp_path, **_REPLAY_SETTINGS) as client:
         job_id = _parked_job(client)
         pings = 0
         with client.stream(
@@ -119,8 +120,6 @@ def test_heartbeat_frames_on_idle_stream(tmp_path: Any) -> None:
             for i, line in enumerate(r.iter_lines()):
                 if line == ": ping":
                     pings += 1
-                    if pings >= 2:
-                        break
                 if i > 100:
                     break
         assert pings >= 2

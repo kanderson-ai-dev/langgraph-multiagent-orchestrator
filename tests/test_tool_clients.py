@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 import pytest
 import respx
+from tenacity import wait_none
 
 from app.core.config import Settings
 from app.services.document_parser import parse_document
@@ -436,23 +437,28 @@ async def test_robots_5xx_deny_policy_blocks(monkeypatch: Any) -> None:
 @respx.mock
 async def test_robots_timeout_obeys_deny_policy(monkeypatch: Any) -> None:
     _dns(monkeypatch, [_PUBLIC_IP])
-    respx.get("https://ok.test/robots.txt").mock(
+    # Keep the 3-attempt retry but drop the exponential sleeps.
+    monkeypatch.setattr(ScraperClient._fetch.retry, "wait", wait_none())
+    robots = respx.get("https://ok.test/robots.txt").mock(
         side_effect=httpx.ConnectTimeout("boom")
     )
     s = ScraperClient(_robots_settings(scrape_robots_fail_policy="deny"))
     with pytest.raises(ScrapeError, match="robots"):
         await s.scrape("https://ok.test/p")
+    assert robots.call_count == 3
 
 
 @respx.mock
 async def test_robots_timeout_obeys_allow_policy(monkeypatch: Any) -> None:
     _dns(monkeypatch, [_PUBLIC_IP])
-    respx.get("https://ok.test/robots.txt").mock(
+    monkeypatch.setattr(ScraperClient._fetch.retry, "wait", wait_none())
+    robots = respx.get("https://ok.test/robots.txt").mock(
         side_effect=httpx.ConnectTimeout("boom")
     )
     respx.get("https://ok.test/p").mock(return_value=httpx.Response(200))
     s = ScraperClient(_robots_settings(scrape_robots_fail_policy="allow"))
     assert (await s.scrape("https://ok.test/p")).status_code == 200
+    assert robots.call_count == 3
 
 
 # ─── Document parser ─────────────────────────────────────────────────────────

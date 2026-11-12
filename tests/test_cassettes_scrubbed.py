@@ -71,8 +71,13 @@ def test_no_cassette_contains_secret_values() -> None:
             )
 
 
+# ~9.6 MB of cassettes — the C loader parses them in a fraction of the
+# pure-Python SafeLoader's time.
+_Loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
 def test_no_cassette_records_auth_headers() -> None:
     for path in CASSETTE_DIR.glob("*.yaml"):
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = yaml.load(path.read_text(encoding="utf-8"), Loader=_Loader)
         leaked = set(_iter_header_names(data)) & _FORBIDDEN_HEADERS
         assert not leaked, f"{path.name}: auth headers recorded: {leaked}"

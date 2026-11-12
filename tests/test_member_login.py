@@ -32,8 +32,9 @@ def _settings() -> Settings:
     )
 
 
-@pytest.fixture()
-def client(tmp_path: Any) -> Any:
+def _client(tmp_path: Any, *, login_limit: int = 60) -> TestClient:
+    """Auth-enabled app; ``login_limit`` tunes the injected rate limiter
+    so the spray test can trip it after a few attempts."""
     settings = _settings()
     graph = build_graph(
         settings,
@@ -45,12 +46,17 @@ def client(tmp_path: Any) -> Any:
     db = str(tmp_path / "members.sqlite")
     app = create_app()
     app.dependency_overrides[get_settings] = lambda: settings
-    limiter = InMemoryRateLimiter(limit=60, window_seconds=60)
+    limiter = InMemoryRateLimiter(limit=login_limit, window_seconds=60)
     app.dependency_overrides[get_rate_limiter] = lambda: limiter
     app.state.runner = JobRunner(graph, JobStore(db), UsageStore(db), settings)
     app.state.job_store = JobStore(db)
     app.state.usage_store = UsageStore(db)
-    with TestClient(app) as c:
+    return TestClient(app)
+
+
+@pytest.fixture()
+def client(tmp_path: Any) -> Any:
+    with _client(tmp_path) as c:
         yield c
 
 
@@ -178,16 +184,17 @@ def test_readding_member_preserves_password(client: Any) -> None:
     assert r.status_code == 200
 
 
-def test_login_rate_limited_per_username(client: Any) -> None:
+def test_login_rate_limited_per_username(tmp_path: Any) -> None:
     # The per-username limiter shares the same backing limiter; hammering
     # one username past the budget trips 429 regardless of outcome.
-    for _ in range(60):
-        client.post(
+    with _client(tmp_path, login_limit=4) as client:
+        for _ in range(4):
+            client.post(
+                "/api/v1/auth/login",
+                json={"username": "spray", "password": "nope-nope-nope"},
+            )
+        r = client.post(
             "/api/v1/auth/login",
             json={"username": "spray", "password": "nope-nope-nope"},
         )
-    r = client.post(
-        "/api/v1/auth/login",
-        json={"username": "spray", "password": "nope-nope-nope"},
-    )
-    assert r.status_code == 429
+        assert r.status_code == 429

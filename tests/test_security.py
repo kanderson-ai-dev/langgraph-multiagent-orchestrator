@@ -1,5 +1,7 @@
 """Security helpers: bcrypt hashing and JWT round-trip."""
 
+from typing import Any
+
 from app.core.config import Settings
 from app.core.security import (
     hash_password,
@@ -21,6 +23,14 @@ def test_password_hash_round_trip() -> None:
 
 def test_verify_password_malformed_hash_returns_false() -> None:
     assert not verify_password("anything", "not-a-bcrypt-hash")
+
+
+def test_hash_password_keeps_production_cost(monkeypatch: Any) -> None:
+    """The suite's cheap-bcrypt fixture must not leak into app code: an
+    un-patched ``hash_password`` still hashes at cost ≥ 12."""
+    monkeypatch.undo()  # drop the autouse rounds=4 patch for this check
+    cost = int(hash_password("pin").split("$")[2])
+    assert cost >= 12
 
 
 def test_jwt_round_trip() -> None:
