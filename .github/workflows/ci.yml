@@ -54,6 +54,7 @@ jobs:
       - name: pytest + coverage (≥85% on app/)
         run: >
           uv run pytest -v
+          --durations=15
           --cov=app --cov-report=term-missing --cov-report=xml
           --cov-fail-under=85
         env:

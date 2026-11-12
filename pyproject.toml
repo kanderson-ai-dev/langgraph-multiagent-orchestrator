@@ -56,6 +56,7 @@ dev = [
     "pytest-asyncio>=0.25.0",
     "pytest-cov>=6.0.0",
     "pytest-recording>=0.14.0",
+    "pytest-timeout>=2.4,<3",
     "respx>=0.22.0",
     "rfc3161-client>=1.0.9,<2",
     "ruff>=0.9.0",
@@ -78,7 +79,7 @@ known-first-party = ["app", "tests", "evaluation"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+addopts = "-ra --strict-markers --timeout=120"
 filterwarnings = [
     # Leaked database connections — sync (sqlite3) or async (aiosqlite) —
     # mean a store or task was orphaned at teardown. Message-matched
